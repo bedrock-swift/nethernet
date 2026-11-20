@@ -13,7 +13,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 ## Features
 
 - LAN discovery and signaling over UDP
-- Client for dedicated servers that accept unsigned HTTP join offers
+- HTTP join client and listener for unsigned sessions
 - WebRTC reliable and unreliable data channels
 - Fragmentation and reassembly for reliable messages
 - Protocol codecs and a WebRTC interface for custom transports
@@ -34,3 +34,5 @@ To test an HTTP join endpoint that echoes payloads, use `dial-http` with its bas
 ```sh
 swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatachannel
 ```
+
+To serve HTTP join through an existing HTTP server, pass the UTF-8 request body and decimal network ID from `POST /v1/join/{networkID}` to `NetherNetHTTPListener.answer(_:from:)`. Return the answer with `Content-Type: application/sdp`. Open WebRTC connections arrive on `listener.connections`.

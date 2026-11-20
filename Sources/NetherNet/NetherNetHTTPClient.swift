@@ -3,10 +3,15 @@ import Foundation
 import FoundationNetworking
 #endif
 
+let maximumHTTPJoinBody = 1 << 20
+
 public enum HTTPJoinError: Error, Equatable {
     case invalidEndpoint
     case invalidResponse
     case invalidAnswer
+    case invalidOffer
+    case invalidConnectionLimit
+    case tooManyConnections
     case bodyTooLarge
     case status(Int)
     case rejected(UInt32)
@@ -39,12 +44,8 @@ public struct NetherNetHTTPClient: Sendable {
         let deadline = ContinuousClock.now.advanced(by: timeout)
         do {
             try await connection.start()
-            while true {
-                try Task.checkCancellation()
-                if try await connection.checkOpen() { return connection }
-                guard ContinuousClock.now < deadline else { throw HTTPJoinError.timedOut }
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            try await connection.waitForHTTPChannels(until: deadline)
+            return connection
         } catch {
             await connection.close()
             throw error
@@ -88,7 +89,7 @@ private actor HTTPExchange: NetherNetSignaling {
     func send(_ signal: Signal, to networkID: UInt64) async throws {
         guard signal.kind == .offer else { throw ConnectionError.invalidSignal }
         let body = Data(signal.data.utf8)
-        guard body.count <= HTTPBody.limit else { throw HTTPJoinError.bodyTooLarge }
+        guard body.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.httpBody = body
@@ -105,7 +106,6 @@ private actor HTTPExchange: NetherNetSignaling {
 }
 
 private final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    static let limit = 1 << 20
     typealias Response = (Int, Data)
     let output: AsyncThrowingStream<Response, any Error>.Continuation
     private var status: Int?
@@ -140,7 +140,7 @@ private final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Senda
             return
         }
         status = response.statusCode
-        guard response.expectedContentLength <= Self.limit else {
+        guard response.expectedContentLength <= maximumHTTPJoinBody else {
             output.finish(throwing: HTTPJoinError.bodyTooLarge)
             completionHandler(.cancel)
             return
@@ -149,7 +149,7 @@ private final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Senda
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard data.count <= Self.limit - body.count else {
+        guard data.count <= maximumHTTPJoinBody - body.count else {
             output.finish(throwing: HTTPJoinError.bodyTooLarge)
             dataTask.cancel()
             return
