@@ -20,7 +20,8 @@ import Testing
     let connection = NetherNetConnection(
         networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: StubPeer()
     )
-    try await connection.receive(Signal(kind: .candidate, connectionID: 2, data: "candidate"))
+    let candidate = Signal(kind: .candidate, connectionID: 2, data: "candidate")
+    for _ in 0..<129 { try await connection.receive(candidate) }
     try await connection.start()
     await #expect(throws: ConnectionError.invalidSignal) {
         try await connection.receive(Signal(kind: .offer, connectionID: 2, data: "offer"))

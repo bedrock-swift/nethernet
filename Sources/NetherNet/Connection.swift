@@ -49,6 +49,7 @@ public actor NetherNetConnection {
     private var negotiation = Negotiation.idle
     private var localCandidates: [String] = []
     private var remoteCandidates: [String] = []
+    private var seenRemoteCandidates: Set<String> = []
     private var closed = false
     private var closeError: (any Error)?
 
@@ -103,10 +104,12 @@ public actor NetherNetConnection {
                 for candidate in remoteCandidates { try peer.remoteCandidate(candidate) }
                 remoteCandidates.removeAll()
             case .candidate:
+                guard !seenRemoteCandidates.contains(signal.data) else { return }
+                guard seenRemoteCandidates.count < 128 else { throw ConnectionError.overflow }
+                seenRemoteCandidates.insert(signal.data)
                 if negotiation == .negotiated {
                     try peer.remoteCandidate(signal.data)
                 } else {
-                    guard remoteCandidates.count < 128 else { throw ConnectionError.overflow }
                     remoteCandidates.append(signal.data)
                 }
             case .error:

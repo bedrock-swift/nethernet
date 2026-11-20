@@ -24,6 +24,13 @@ public actor NetherNetLAN {
         let connection: UInt64
     }
 
+    private struct PendingSignal {
+        let bytes: [UInt8]
+        let interval: Duration
+        var due: ContinuousClock.Instant
+        var retries = 3
+    }
+
     private struct Signaling: NetherNetSignaling {
         weak var transport: NetherNetLAN?
 
@@ -40,6 +47,7 @@ public actor NetherNetLAN {
     private let gate = ReceiveGate()
     private var discovery: LANDiscovery<LANAddress>
     private var sessions: [Key: NetherNetConnection] = [:]
+    private var pendingSignals: [Key: [PendingSignal]] = [:]
     private var earlyCandidates: [Key: [Signal]] = [:]
     private var worker: Task<Void, Never>?
     private var closed = false
@@ -109,12 +117,13 @@ public actor NetherNetLAN {
         let key = Key(network: remoteID, connection: .random(in: 1...UInt64.max))
         let connection = try create(key)
         sessions[key] = connection
+        pendingSignals[key] = []
         do {
             try await connection.start()
-            try await waitForOpen(connection, timeout: timeout)
+            try await waitForOpen(connection, key: key, timeout: timeout)
             return connection
         } catch {
-            sessions.removeValue(forKey: key)
+            removeSession(key)
             await connection.close()
             throw error
         }
@@ -130,13 +139,19 @@ public actor NetherNetLAN {
         let active = Array(sessions.values)
         sessions.removeAll()
         earlyCandidates.removeAll()
+        pendingSignals.removeAll()
         for connection in active { await connection.close() }
     }
 
     private func send(_ signal: Signal, to remoteID: UInt64) throws {
         guard !closed else { throw ConnectionError.closed }
         guard let endpoint = discovery.endpoint(for: remoteID) else { throw LANError.unknownPeer }
-        try socket.send(discovery.message(signal, to: remoteID), to: endpoint)
+        let bytes = try discovery.message(signal, to: remoteID)
+        try socket.send(bytes, to: endpoint)
+        let key = Key(network: remoteID, connection: signal.connectionID)
+        guard let count = pendingSignals[key]?.count, count < 130 else { return }
+        let interval: Duration = signal.kind == .offer ? .seconds(2) : .milliseconds(500)
+        pendingSignals[key]?.append(PendingSignal(bytes: bytes, interval: interval, due: .now.advanced(by: interval)))
     }
 
     private func receive(_ bytes: [UInt8], from sender: LANAddress) async {
@@ -153,8 +168,10 @@ public actor NetherNetLAN {
                 await accept(signal, key: key)
             } else if signal.kind == .candidate,
                       earlyCandidates[key] != nil || earlyCandidates.count < 64 {
-                if earlyCandidates[key, default: []].count < 16 {
-                    earlyCandidates[key, default: []].append(signal)
+                var candidates = earlyCandidates[key, default: []]
+                if candidates.count < 16, !candidates.contains(signal) {
+                    candidates.append(signal)
+                    earlyCandidates[key] = candidates
                 }
             }
         case nil:
@@ -166,11 +183,12 @@ public actor NetherNetLAN {
         await prune()
         guard !closed, sessions.count < 64, let connection = try? create(key) else { return }
         sessions[key] = connection
+        pendingSignals[key] = []
         do {
             try await connection.receive(offer)
             for signal in earlyCandidates.removeValue(forKey: key) ?? [] { try await connection.receive(signal) }
         } catch {
-            sessions.removeValue(forKey: key)
+            removeSession(key)
             await connection.close()
             return
         }
@@ -181,22 +199,27 @@ public actor NetherNetLAN {
 
     private func publish(_ connection: NetherNetConnection, key: Key) async {
         do {
-            try await waitForOpen(connection, timeout: .seconds(8))
+            try await waitForOpen(connection, key: key, timeout: .seconds(8))
             switch accepting.yield(connection) {
             case .dropped, .terminated: throw ConnectionError.overflow
             case .enqueued: break
             @unknown default: throw ConnectionError.overflow
             }
         } catch {
-            sessions.removeValue(forKey: key)
+            removeSession(key)
             await connection.close()
         }
     }
 
     private func prune() async {
         for (key, connection) in sessions {
-            if await connection.isClosed { sessions.removeValue(forKey: key) }
+            if await connection.isClosed { removeSession(key) }
         }
+    }
+
+    private func removeSession(_ key: Key) {
+        sessions.removeValue(forKey: key)
+        pendingSignals.removeValue(forKey: key)
     }
 
     private func create(_ key: Key) throws -> NetherNetConnection {
@@ -206,13 +229,28 @@ public actor NetherNetLAN {
         )
     }
 
-    private func waitForOpen(_ connection: NetherNetConnection, timeout: Duration) async throws {
+    private func resendSignals(for key: Key, now: ContinuousClock.Instant) {
+        guard var pending = pendingSignals[key], pending.contains(where: { $0.due <= now }),
+              let endpoint = discovery.endpoint(for: key.network) else { return }
+        for index in pending.indices where pending[index].due <= now {
+            try? socket.send(pending[index].bytes, to: endpoint)
+            pending[index].retries -= 1
+            pending[index].due = now.advanced(by: pending[index].interval)
+        }
+        pending.removeAll { $0.retries == 0 }
+        pendingSignals[key] = pending
+    }
+
+    private func waitForOpen(_ connection: NetherNetConnection, key: Key, timeout: Duration) async throws {
+        defer { pendingSignals.removeValue(forKey: key) }
         let deadline = ContinuousClock.now.advanced(by: timeout)
         while true {
             try Task.checkCancellation()
             guard !closed else { throw ConnectionError.closed }
             if try await connection.checkOpen() { return }
-            guard ContinuousClock.now < deadline else { throw LANError.timedOut }
+            let now = ContinuousClock.now
+            guard now < deadline else { throw LANError.timedOut }
+            resendSignals(for: key, now: now)
             try await Task.sleep(for: .milliseconds(10))
         }
     }
