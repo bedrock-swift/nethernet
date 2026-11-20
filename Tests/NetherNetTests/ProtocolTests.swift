@@ -95,3 +95,23 @@ import Testing
     #expect(Array(encoded.prefix(32)) == expectedTag)
     #expect(try DiscoveryPacket(decoding: encoded) == packet)
 }
+
+@Test func discoveryKeepsARecentRouteAndAcceptsANewAddressAfterExpiry() throws {
+    var discovery = LANDiscovery<String>(networkID: 1)
+    let response = try DiscoveryPacket(sender: 2, body: .response([42])).encode()
+    let now = ContinuousClock.now
+    _ = try discovery.receive(response, from: "original", at: now)
+    let refreshed = now.advanced(by: .seconds(5))
+    _ = try discovery.receive(response, from: "original", at: refreshed)
+
+    let beforeExpiry = now.advanced(by: .seconds(19))
+    let ignored = try discovery.receive(response, from: "new", at: beforeExpiry)
+    #expect(ignored.event == nil)
+    #expect(discovery.endpoint(for: 2, at: beforeExpiry) == "original")
+
+    let expired = now.advanced(by: .seconds(20))
+    #expect(discovery.endpoint(for: 2, at: expired) == nil)
+    let replacement = try discovery.receive(response, from: "new", at: expired)
+    #expect(replacement.event == .advertisement(networkID: 2, payload: [42], from: "new"))
+    #expect(discovery.endpoint(for: 2, at: expired) == "new")
+}
