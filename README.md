@@ -14,7 +14,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 
 - LAN discovery and signaling over UDP
 - HTTP join client and listener for unsigned sessions
-- WebRTC reliable and unreliable data channels
+- WebRTC reliable and unreliable data channels with configurable STUN and TURN servers
 - Fragmentation and reassembly for reliable messages
 - Protocol codecs and a WebRTC interface for custom transports
 

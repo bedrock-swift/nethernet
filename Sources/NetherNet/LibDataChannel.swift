@@ -11,6 +11,7 @@ public enum WebRTCError: Error, Equatable {
     case libraryUnavailable(String)
     case missingSymbol(String)
     case unsupportedArchitecture
+    case invalidICEServer
     case native(Int32)
 }
 
@@ -66,7 +67,11 @@ public final class LibDataChannel: @unchecked Sendable {
     }
 
     public func makePeer(trickleICE: Bool) throws -> any WebRTCPeer {
-        try NativePeer(api: self, trickleICE: trickleICE)
+        try makePeer(iceServers: [], trickleICE: trickleICE)
+    }
+
+    public func makePeer(iceServers: [String], trickleICE: Bool = true) throws -> any WebRTCPeer {
+        try NativePeer(api: self, iceServers: iceServers, trickleICE: trickleICE)
     }
 
     fileprivate func function<T>(_ name: String, as type: T.Type) -> T {
@@ -198,13 +203,27 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
     private let lock = NSLock()
     private var closed = false
 
-    init(api: LibDataChannel, trickleICE: Bool) throws {
+    init(api: LibDataChannel, iceServers: [String], trickleICE: Bool) throws {
+        guard let serverCount = Int32(exactly: iceServers.count),
+              iceServers.allSatisfy({ !$0.isEmpty && !$0.utf8.contains(0) }) else { throw WebRTCError.invalidICEServer }
         let create = api.function("rtcCreatePeerConnection", as: (@convention(c) (UnsafeRawPointer) -> Int32).self)
         let config = UnsafeMutableRawPointer.allocate(byteCount: 56, alignment: 8)
         defer { config.deallocate() }
         config.initializeMemory(as: UInt8.self, repeating: 0, count: 56)
         config.storeBytes(of: UInt8(1), toByteOffset: 42, as: UInt8.self) // disable auto negotiation
-        peerID = try Self.checked(create(UnsafeRawPointer(config)))
+        let servers = iceServers.map { url in
+            url.utf8CString.withUnsafeBufferPointer { bytes in
+                let string = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
+                string.initialize(from: bytes.baseAddress!, count: bytes.count)
+                return UnsafePointer(string)
+            }
+        }
+        defer { for server in servers { UnsafeMutablePointer(mutating: server).deallocate() } }
+        peerID = try servers.withUnsafeBufferPointer { buffer in
+            config.storeBytes(of: buffer.baseAddress, as: UnsafePointer<UnsafePointer<CChar>>?.self)
+            config.storeBytes(of: serverCount, toByteOffset: 8, as: Int32.self)
+            return try Self.checked(create(UnsafeRawPointer(config)))
+        }
 
         let stream = AsyncStream<PeerEvent>.makeStream(bufferingPolicy: .bufferingOldest(256))
         events = stream.stream
