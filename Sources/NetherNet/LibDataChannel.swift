@@ -15,6 +15,7 @@ public enum WebRTCError: Error, Equatable {
 }
 
 private typealias DescriptionCallback = @convention(c) (Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void
+private typealias GatheringCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias ChannelCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias OpenCallback = @convention(c) (Int32, UnsafeMutableRawPointer?) -> Void
 private typealias MessageCallback = @convention(c) (Int32, UnsafePointer<CChar>?, Int32, UnsafeMutableRawPointer?) -> Void
@@ -37,6 +38,7 @@ public final class LibDataChannel: @unchecked Sendable {
             "rtcCreatePeerConnection", "rtcDeletePeerConnection", "rtcSetUserPointer",
             "rtcSetLocalDescriptionCallback", "rtcSetLocalCandidateCallback", "rtcSetDataChannelCallback",
             "rtcSetLocalDescription", "rtcSetRemoteDescription", "rtcAddRemoteCandidate",
+            "rtcSetGatheringStateChangeCallback", "rtcGetLocalDescription", "rtcGetLocalDescriptionType",
             "rtcCreateDataChannel", "rtcCreateDataChannelEx", "rtcDeleteDataChannel", "rtcGetDataChannelLabel",
             "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetMessageCallback", "rtcIsOpen", "rtcSendMessage"
         ]
@@ -60,7 +62,11 @@ public final class LibDataChannel: @unchecked Sendable {
     }
 
     public func makePeer() throws -> any WebRTCPeer {
-        try NativePeer(api: self)
+        try makePeer(trickleICE: true)
+    }
+
+    public func makePeer(trickleICE: Bool) throws -> any WebRTCPeer {
+        try NativePeer(api: self, trickleICE: trickleICE)
     }
 
     fileprivate func function<T>(_ name: String, as type: T.Type) -> T {
@@ -108,6 +114,30 @@ private final class ChannelContext: @unchecked Sendable {
     init(api: LibDataChannel, output: AsyncStream<PeerEvent>.Continuation) {
         self.api = api
         self.output = output
+    }
+
+    func publishGatheredDescription(for id: Int32) {
+        guard let type = nativeString("rtcGetLocalDescriptionType", for: id),
+              let description = nativeString("rtcGetLocalDescription", for: id) else {
+            output.finish()
+            return
+        }
+        switch type {
+        case "offer": yield(.description(.offer, description))
+        case "answer": yield(.description(.answer, description))
+        default: output.finish()
+        }
+    }
+
+    private func nativeString(_ symbol: String, for id: Int32) -> String? {
+        let get = api.function(symbol, as: (@convention(c) (Int32, UnsafeMutablePointer<CChar>?, Int32) -> Int32).self)
+        let size = get(id, nil, 0)
+        guard (1...1_048_576).contains(size) else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(size))
+        return buffer.withUnsafeMutableBufferPointer { bytes in
+            guard let start = bytes.baseAddress, get(id, start, size) > 0 else { return nil }
+            return String(validatingCString: start)
+        }
     }
 
     func yield(_ event: PeerEvent) {
@@ -168,7 +198,7 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
     private let lock = NSLock()
     private var closed = false
 
-    init(api: LibDataChannel) throws {
+    init(api: LibDataChannel, trickleICE: Bool) throws {
         let create = api.function("rtcCreatePeerConnection", as: (@convention(c) (UnsafeRawPointer) -> Int32).self)
         let config = UnsafeMutableRawPointer.allocate(byteCount: 56, alignment: 8)
         defer { config.deallocate() }
@@ -181,20 +211,28 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
         context = ChannelContext(api: api, output: stream.continuation)
         callbacks.add(context, for: peerID)
         api.useCallbacks(for: peerID)
-        let onDescription = api.function("rtcSetLocalDescriptionCallback", as: (@convention(c) (Int32, DescriptionCallback?) -> Int32).self)
-        let onCandidate = api.function("rtcSetLocalCandidateCallback", as: (@convention(c) (Int32, DescriptionCallback?) -> Int32).self)
         let onChannel = api.function("rtcSetDataChannelCallback", as: (@convention(c) (Int32, ChannelCallback?) -> Int32).self)
-        _ = onDescription(peerID) { id, sdp, type, _ in
-            guard let sdp, let type, let context = callbacks[id] else { return }
-            switch String(cString: type) {
-            case "offer": context.yield(.description(.offer, String(cString: sdp)))
-            case "answer": context.yield(.description(.answer, String(cString: sdp)))
-            default: break
+        if trickleICE {
+            let onDescription = api.function("rtcSetLocalDescriptionCallback", as: (@convention(c) (Int32, DescriptionCallback?) -> Int32).self)
+            let onCandidate = api.function("rtcSetLocalCandidateCallback", as: (@convention(c) (Int32, DescriptionCallback?) -> Int32).self)
+            _ = onDescription(peerID) { id, sdp, type, _ in
+                guard let sdp, let type, let context = callbacks[id] else { return }
+                switch String(cString: type) {
+                case "offer": context.yield(.description(.offer, String(cString: sdp)))
+                case "answer": context.yield(.description(.answer, String(cString: sdp)))
+                default: break
+                }
             }
-        }
-        _ = onCandidate(peerID) { id, candidate, _, _ in
-            guard let candidate else { return }
-            callbacks[id]?.yield(.candidate(String(cString: candidate)))
+            _ = onCandidate(peerID) { id, candidate, _, _ in
+                guard let candidate else { return }
+                callbacks[id]?.yield(.candidate(String(cString: candidate)))
+            }
+        } else {
+            let onGathering = api.function("rtcSetGatheringStateChangeCallback", as: (@convention(c) (Int32, GatheringCallback?) -> Int32).self)
+            _ = onGathering(peerID) { id, state, _ in
+                guard state == 2 else { return } // gathering complete
+                callbacks[id]?.publishGatheredDescription(for: id)
+            }
         }
         _ = onChannel(peerID) { id, channel, _ in callbacks[id]?.attach(channel) }
     }
