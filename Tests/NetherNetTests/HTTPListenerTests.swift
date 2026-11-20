@@ -1,3 +1,4 @@
+import Foundation
 import NetherNet
 import Testing
 
@@ -68,4 +69,25 @@ private struct AnsweringPeer: WebRTCPeer {
     await listener.close()
     unblock.continuation.finish()
     await #expect(throws: ConnectionError.closed) { try await first.value }
+}
+
+@Test func httpHandlerRoutesStatusAndJoin() async throws {
+    let listener = try NetherNetHTTPListener { AnsweringPeer() }
+    let status = HTTPServerStatus(
+        name: "Server", world: "World", protocolVersion: 819, version: "1.21.94",
+        players: 1, capacity: 8, gameMode: 0
+    )
+    let handler = NetherNetHTTPHandler(listener: listener, status: status)
+    let statusResponse = await handler.handle(method: "GET", path: "/v1/join")
+    #expect(statusResponse.statusCode == 200)
+    #expect(statusResponse.contentType == "application/json")
+    #expect(try JSONDecoder().decode(HTTPServerStatus.self, from: statusResponse.body) == status)
+
+    let malformed = await handler.handle(method: "POST", path: "/v1/join/+42", body: Data("offer".utf8))
+    #expect(malformed.statusCode == 400)
+    let answer = await handler.handle(method: "POST", path: "/v1/join/42", body: Data("offer".utf8))
+    #expect(answer.statusCode == 200)
+    #expect(answer.contentType == "application/sdp")
+    #expect(answer.body == Data("answer".utf8))
+    await handler.close()
 }

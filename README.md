@@ -35,7 +35,7 @@ To test an HTTP join endpoint that echoes payloads, use `dial-http` with its bas
 swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatachannel
 ```
 
-To serve HTTP join through an existing HTTP server, pass the UTF-8 request body and decimal network ID from `POST /v1/join/{networkID}` to `NetherNetHTTPListener.answer(_:from:)`. Return the answer with `Content-Type: application/sdp`. Open WebRTC connections arrive on `listener.connections`.
+Mount `NetherNetHTTPHandler` in an HTTP server to serve `GET /v1/join` and `POST /v1/join/{networkID}`. Pass the request method, path and body to `handle`, then return its status, content type and body. Open WebRTC connections arrive on `handler.connections`.
 
 Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
 
