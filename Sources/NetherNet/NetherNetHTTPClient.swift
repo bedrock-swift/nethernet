@@ -7,6 +7,7 @@ let maximumHTTPJoinBody = 1 << 20
 
 public enum HTTPJoinError: Error, Equatable {
     case invalidEndpoint
+    case invalidClientInfo
     case invalidResponse
     case invalidAnswer
     case invalidOffer
@@ -16,6 +17,18 @@ public enum HTTPJoinError: Error, Equatable {
     case status(Int)
     case rejected(UInt32)
     case timedOut
+}
+
+public struct HTTPClientInfo: Equatable, Sendable {
+    public let version: String
+    public let protocolVersion: Int
+    public let platform: Int
+
+    public init(version: String, protocolVersion: Int, platform: Int) {
+        self.version = version
+        self.protocolVersion = protocolVersion
+        self.platform = platform
+    }
 }
 
 public struct NetherNetHTTPClient: Sendable {
@@ -56,10 +69,30 @@ public struct NetherNetHTTPClient: Sendable {
         }
     }
 
-    public func status(at endpoint: URL) async throws -> HTTPServerStatus? {
-        let url = try Self.endpointURL(endpoint, path: "/v1/join")
+    public func probeRequest(at endpoint: URL, clientInfo: HTTPClientInfo? = nil) throws -> URLRequest {
+        var url = try Self.endpointURL(endpoint, path: "/v1/join")
+        if let clientInfo {
+            guard !clientInfo.version.isEmpty, clientInfo.protocolVersion > 0, clientInfo.platform > 0,
+                  var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                throw HTTPJoinError.invalidClientInfo
+            }
+            components.queryItems = [
+                URLQueryItem(name: "version", value: clientInfo.version),
+                URLQueryItem(name: "protocol", value: String(clientInfo.protocolVersion)),
+                URLQueryItem(name: "platform", value: String(clientInfo.platform)),
+                URLQueryItem(name: "id", value: String(networkID))
+            ]
+            guard let target = components.url else { throw HTTPJoinError.invalidClientInfo }
+            url = target
+        }
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("libhttpclient/1.0.0.0", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    public func status(at endpoint: URL, clientInfo: HTTPClientInfo? = nil) async throws -> HTTPServerStatus? {
+        let request = try probeRequest(at: endpoint, clientInfo: clientInfo)
         let (status, bytes) = try await HTTPBody.load(request)
         guard (200..<300).contains(status) else { throw HTTPJoinError.status(status) }
         return bytes.isEmpty ? nil : try JSONDecoder().decode(HTTPServerStatus.self, from: bytes)
