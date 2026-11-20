@@ -24,6 +24,12 @@ public actor NetherNetLAN {
         let connection: UInt64
     }
 
+    private struct EarlyCandidates {
+        let sender: LANAddress
+        let expires: ContinuousClock.Instant
+        var signals: [Signal] = []
+    }
+
     private struct PendingSignal {
         let bytes: [UInt8]
         let interval: Duration
@@ -48,7 +54,7 @@ public actor NetherNetLAN {
     private var discovery: LANDiscovery<LANAddress>
     private var sessions: [Key: NetherNetConnection] = [:]
     private var pendingSignals: [Key: [PendingSignal]] = [:]
-    private var earlyCandidates: [Key: [Signal]] = [:]
+    private var earlyCandidates: [Key: EarlyCandidates] = [:]
     private var worker: Task<Void, Never>?
     private var closed = false
 
@@ -160,33 +166,45 @@ public actor NetherNetLAN {
         switch input.event {
         case let .advertisement(id, data, address):
             _ = advertising.yield(LANAdvertisement(networkID: id, address: address, data: data))
-        case let .signal(signal, id, _):
+        case let .signal(signal, id, sender):
             let key = Key(network: id, connection: signal.connectionID)
             if let connection = sessions[key] {
                 try? await connection.receive(signal)
             } else if signal.kind == .offer, discovery.advertisement != nil {
-                await accept(signal, key: key)
-            } else if signal.kind == .candidate,
-                      earlyCandidates[key] != nil || earlyCandidates.count < 64 {
-                var candidates = earlyCandidates[key, default: []]
-                if candidates.count < 16, !candidates.contains(signal) {
-                    candidates.append(signal)
-                    earlyCandidates[key] = candidates
-                }
+                await accept(signal, from: sender, key: key)
+            } else if signal.kind == .candidate {
+                bufferCandidate(signal, from: sender, key: key)
             }
         case nil:
             break
         }
     }
 
-    private func accept(_ offer: Signal, key: Key) async {
+    private func bufferCandidate(_ signal: Signal, from sender: LANAddress, key: Key) {
+        let now = ContinuousClock.now
+        if let current = earlyCandidates[key], current.sender != sender || current.expires <= now {
+            earlyCandidates.removeValue(forKey: key)
+        }
+        if earlyCandidates[key] == nil, earlyCandidates.count >= 64 {
+            earlyCandidates = earlyCandidates.filter { now < $0.value.expires }
+            guard earlyCandidates.count < 64 else { return }
+        }
+        var entry = earlyCandidates[key] ?? EarlyCandidates(sender: sender, expires: now.advanced(by: .seconds(8)))
+        guard entry.signals.count < 16, !entry.signals.contains(signal) else { return }
+        entry.signals.append(signal)
+        earlyCandidates[key] = entry
+    }
+
+    private func accept(_ offer: Signal, from sender: LANAddress, key: Key) async {
         await prune()
         guard !closed, sessions.count < 64, let connection = try? create(key) else { return }
         sessions[key] = connection
         pendingSignals[key] = []
         do {
             try await connection.receive(offer)
-            for signal in earlyCandidates.removeValue(forKey: key) ?? [] { try await connection.receive(signal) }
+            if let entry = earlyCandidates.removeValue(forKey: key), entry.sender == sender, .now < entry.expires {
+                for signal in entry.signals { try await connection.receive(signal) }
+            }
         } catch {
             removeSession(key)
             await connection.close()
