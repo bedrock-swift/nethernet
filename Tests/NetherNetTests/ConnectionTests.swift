@@ -16,6 +16,19 @@ import Testing
     await #expect(throws: error) { try await connection.checkOpen() }
 }
 
+@Test func earlyCandidateDoesNotPreventStartingAnOffer() async throws {
+    let connection = NetherNetConnection(
+        networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: StubPeer()
+    )
+    try await connection.receive(Signal(kind: .candidate, connectionID: 2, data: "candidate"))
+    try await connection.start()
+    await #expect(throws: ConnectionError.invalidSignal) {
+        try await connection.receive(Signal(kind: .offer, connectionID: 2, data: "offer"))
+    }
+    try await connection.receive(Signal(kind: .answer, connectionID: 2, data: "answer"))
+    await connection.close()
+}
+
 private struct StubSignaling: NetherNetSignaling {
     func send(_ signal: Signal, to networkID: UInt64) async throws {}
 }

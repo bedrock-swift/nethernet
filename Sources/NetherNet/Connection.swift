@@ -33,6 +33,12 @@ public actor NetherNetConnection {
     public nonisolated let connectionID: UInt64
     public nonisolated let messages: AsyncThrowingStream<[UInt8], any Error>
 
+    private enum Negotiation {
+        case idle
+        case offering
+        case negotiated
+    }
+
     private let peer: any WebRTCPeer
     private let signaling: any NetherNetSignaling
     private let output: AsyncThrowingStream<[UInt8], any Error>.Continuation
@@ -40,7 +46,7 @@ public actor NetherNetConnection {
     private var opened: Set<DataChannel> = []
     private var incoming = MessageCodec()
     private var localDescriptionSent = false
-    private var receivedDescription = false
+    private var negotiation = Negotiation.idle
     private var localCandidates: [String] = []
     private var remoteCandidates: [String] = []
     private var closed = false
@@ -71,7 +77,8 @@ public actor NetherNetConnection {
     }
 
     public func start() throws {
-        guard !closed, worker == nil else { throw ConnectionError.invalidSignal }
+        guard !closed, negotiation == .idle else { throw ConnectionError.invalidSignal }
+        negotiation = .offering
         observe()
         do { try peer.offer() } catch {
             finish(error)
@@ -82,17 +89,21 @@ public actor NetherNetConnection {
     public func receive(_ signal: Signal) throws {
         guard !closed else { throw ConnectionError.closed }
         guard signal.connectionID == connectionID else { throw ConnectionError.invalidSignal }
-        observe()
+        if signal.kind == .offer || signal.kind == .answer {
+            guard negotiation != .negotiated else { return }
+            let expected: Signal.Kind = negotiation == .offering ? .answer : .offer
+            guard signal.kind == expected else { throw ConnectionError.invalidSignal }
+        }
         do {
             switch signal.kind {
             case .offer, .answer:
-                guard !receivedDescription else { return }
+                observe()
                 try peer.remoteDescription(signal.data, kind: signal.kind)
-                receivedDescription = true
+                negotiation = .negotiated
                 for candidate in remoteCandidates { try peer.remoteCandidate(candidate) }
                 remoteCandidates.removeAll()
             case .candidate:
-                if receivedDescription {
+                if negotiation == .negotiated {
                     try peer.remoteCandidate(signal.data)
                 } else {
                     guard remoteCandidates.count < 128 else { throw ConnectionError.overflow }
