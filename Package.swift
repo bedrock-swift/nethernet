@@ -14,7 +14,11 @@ let package = Package(
     targets: [
         .target(
             name: "NetherNet",
-            dependencies: ["CryptoSwift", .product(name: "Crypto", package: "swift-crypto")],
+            dependencies: [
+                "CryptoSwift",
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "CryptoExtras", package: "swift-crypto")
+            ],
             linkerSettings: [.linkedLibrary("ws2_32", .when(platforms: [.windows]))]
         ),
         .executableTarget(name: "NetherNetDemo", dependencies: ["NetherNet"]),

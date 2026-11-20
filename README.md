@@ -40,3 +40,4 @@ To serve HTTP join through an existing HTTP server, pass the UTF-8 request body 
 Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
 
 Use `NetherNetSigningKey` for self-signed identity. Persist its PEM across restarts and pin its public DER key on clients you control.
+Use `MinecraftTokenTrust` with a trusted Minecraft JWKS to verify player tokens and SDP fingerprints.
