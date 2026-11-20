@@ -208,9 +208,10 @@ public actor NetherNetLAN {
 
     private func waitForOpen(_ connection: NetherNetConnection, timeout: Duration) async throws {
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        while !(await connection.isOpen) {
+        while true {
             try Task.checkCancellation()
-            guard !closed, !(await connection.isClosed) else { throw ConnectionError.closed }
+            guard !closed else { throw ConnectionError.closed }
+            if try await connection.checkOpen() { return }
             guard ContinuousClock.now < deadline else { throw LANError.timedOut }
             try await Task.sleep(for: .milliseconds(10))
         }

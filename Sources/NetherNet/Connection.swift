@@ -44,6 +44,7 @@ public actor NetherNetConnection {
     private var localCandidates: [String] = []
     private var remoteCandidates: [String] = []
     private var closed = false
+    private var closeError: (any Error)?
 
     public init(networkID: UInt64, connectionID: UInt64, signaling: any NetherNetSignaling, peer: any WebRTCPeer) {
         self.networkID = networkID
@@ -63,6 +64,11 @@ public actor NetherNetConnection {
 
     public var isClosed: Bool { closed }
     public var isOpen: Bool { !closed && opened.count == 2 }
+
+    func checkOpen() throws -> Bool {
+        if closed { throw closeError ?? ConnectionError.closed }
+        return isOpen
+    }
 
     public func start() throws {
         guard !closed, worker == nil else { throw ConnectionError.invalidSignal }
@@ -161,6 +167,7 @@ public actor NetherNetConnection {
     private func finish(_ error: (any Error)? = nil) {
         guard !closed else { return }
         closed = true
+        closeError = error
         worker?.cancel()
         output.finish(throwing: error)
         peer.close()
