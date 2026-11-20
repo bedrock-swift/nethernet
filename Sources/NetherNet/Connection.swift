@@ -8,6 +8,7 @@ public enum PeerEvent: Sendable {
     case candidate(String)
     case open(DataChannel)
     case message(DataChannel, [UInt8])
+    case failed(any Error)
     case closed
 }
 
@@ -166,6 +167,8 @@ public actor NetherNetConnection {
                    case .dropped = output.yield(message) {
                     throw ConnectionError.overflow
                 }
+            case let .failed(error):
+                finish(error)
             case .closed:
                 finish()
             }

@@ -12,11 +12,12 @@ public enum WebRTCError: Error, Equatable {
     case missingSymbol(String)
     case unsupportedArchitecture
     case invalidICEServer
+    case connectionFailed
     case native(Int32)
 }
 
 private typealias DescriptionCallback = @convention(c) (Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void
-private typealias GatheringCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
+private typealias StateCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias ChannelCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias OpenCallback = @convention(c) (Int32, UnsafeMutableRawPointer?) -> Void
 private typealias MessageCallback = @convention(c) (Int32, UnsafePointer<CChar>?, Int32, UnsafeMutableRawPointer?) -> Void
@@ -39,7 +40,7 @@ public final class LibDataChannel: @unchecked Sendable {
             "rtcCreatePeerConnection", "rtcDeletePeerConnection", "rtcSetUserPointer",
             "rtcSetLocalDescriptionCallback", "rtcSetLocalCandidateCallback", "rtcSetDataChannelCallback",
             "rtcSetLocalDescription", "rtcSetRemoteDescription", "rtcAddRemoteCandidate",
-            "rtcSetGatheringStateChangeCallback", "rtcGetLocalDescription", "rtcGetLocalDescriptionType",
+            "rtcSetStateChangeCallback", "rtcSetGatheringStateChangeCallback", "rtcGetLocalDescription", "rtcGetLocalDescriptionType",
             "rtcCreateDataChannel", "rtcCreateDataChannelEx", "rtcDeleteDataChannel", "rtcGetDataChannelLabel",
             "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetMessageCallback", "rtcIsOpen", "rtcSendMessage"
         ]
@@ -247,13 +248,21 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
                 callbacks[id]?.yield(.candidate(String(cString: candidate)))
             }
         } else {
-            let onGathering = api.function("rtcSetGatheringStateChangeCallback", as: (@convention(c) (Int32, GatheringCallback?) -> Int32).self)
+            let onGathering = api.function("rtcSetGatheringStateChangeCallback", as: (@convention(c) (Int32, StateCallback?) -> Int32).self)
             _ = onGathering(peerID) { id, state, _ in
                 guard state == 2 else { return } // gathering complete
                 callbacks[id]?.publishGatheredDescription(for: id)
             }
         }
         _ = onChannel(peerID) { id, channel, _ in callbacks[id]?.attach(channel) }
+        let onState = api.function("rtcSetStateChangeCallback", as: (@convention(c) (Int32, StateCallback?) -> Int32).self)
+        _ = onState(peerID) { id, state, _ in
+            switch state {
+            case 4: callbacks[id]?.yield(.failed(WebRTCError.connectionFailed)) // rtc failed
+            case 5: callbacks[id]?.yield(.closed) // rtc closed
+            default: break
+            }
+        }
     }
 
     deinit { close() }

@@ -30,6 +30,21 @@ import Testing
     await connection.close()
 }
 
+@Test(.timeLimit(.minutes(1))) func openingReportsNativePeerFailure() async throws {
+    let peer = StubPeer()
+    let connection = NetherNetConnection(networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer)
+    try await connection.start()
+    peer.fail()
+    var messages = connection.messages.makeAsyncIterator()
+    do {
+        _ = try await messages.next()
+        Issue.record("missing WebRTC error")
+    } catch {
+        #expect(error as? WebRTCError == .connectionFailed)
+    }
+    await #expect(throws: WebRTCError.connectionFailed) { try await connection.checkOpen() }
+}
+
 private struct StubSignaling: NetherNetSignaling {
     func send(_ signal: Signal, to networkID: UInt64) async throws {}
 }
@@ -43,4 +58,5 @@ private struct StubPeer: WebRTCPeer {
     func remoteCandidate(_ candidate: String) throws {}
     func send(_ segments: [[UInt8]], on channel: DataChannel) throws {}
     func close() { stream.continuation.finish() }
+    func fail() { stream.continuation.yield(.failed(WebRTCError.connectionFailed)) }
 }
