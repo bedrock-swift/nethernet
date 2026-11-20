@@ -3,21 +3,28 @@ public actor NetherNetHTTPListener {
 
     private let output: AsyncStream<NetherNetConnection>.Continuation
     private let peerFactory: @Sendable () throws -> any WebRTCPeer
+    private let identity: HTTPJoinIdentity
     private let maximumConnections: Int
     private var sessions: [UInt64: NetherNetConnection] = [:]
     private var closed = false
 
-    public init(library: LibDataChannel, maximumConnections: Int = 64) throws {
-        try self.init(maximumConnections: maximumConnections) { try library.makePeer(trickleICE: false) }
+    public init(
+        library: LibDataChannel, maximumConnections: Int = 64, identity: HTTPJoinIdentity = .init()
+    ) throws {
+        try self.init(maximumConnections: maximumConnections, identity: identity) { try library.makePeer(trickleICE: false) }
     }
 
-    public init(maximumConnections: Int = 64, peerFactory: @escaping @Sendable () throws -> any WebRTCPeer) throws {
+    public init(
+        maximumConnections: Int = 64, identity: HTTPJoinIdentity = .init(),
+        peerFactory: @escaping @Sendable () throws -> any WebRTCPeer
+    ) throws {
         guard maximumConnections > 0 else { throw HTTPJoinError.invalidConnectionLimit }
         let stream = AsyncStream<NetherNetConnection>.makeStream(bufferingPolicy: .bufferingOldest(maximumConnections))
         connections = stream.stream
         output = stream.continuation
         self.peerFactory = peerFactory
         self.maximumConnections = maximumConnections
+        self.identity = identity
     }
 
     deinit { output.finish() }
@@ -36,7 +43,8 @@ public actor NetherNetHTTPListener {
 
         var id = UInt64.random(in: 1...UInt64.max)
         while sessions[id] != nil { id = .random(in: 1...UInt64.max) }
-        let exchange = HTTPAnswerExchange()
+        try identity.validateRemote(offer)
+        let exchange = HTTPAnswerExchange(identity: identity)
         let connection = NetherNetConnection(networkID: networkID, connectionID: id, signaling: exchange, peer: try peerFactory())
         sessions[id] = connection
         let deadline = ContinuousClock.now.advanced(by: timeout)
@@ -90,13 +98,17 @@ public actor NetherNetHTTPListener {
 }
 
 private actor HTTPAnswerExchange: NetherNetSignaling {
+    private let identity: HTTPJoinIdentity
     private(set) var answer: String?
+
+    init(identity: HTTPJoinIdentity) { self.identity = identity }
 
     func send(_ signal: Signal, to networkID: UInt64) throws {
         guard signal.kind == .answer, answer == nil else { throw ConnectionError.invalidSignal }
         guard !signal.data.isEmpty else { throw HTTPJoinError.invalidAnswer }
-        guard signal.data.utf8.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
-        answer = signal.data
+        let sdp = try identity.localDescription(signal.data)
+        guard sdp.utf8.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
+        answer = sdp
     }
 }
 

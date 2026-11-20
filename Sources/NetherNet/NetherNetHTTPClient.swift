@@ -20,23 +20,27 @@ public enum HTTPJoinError: Error, Equatable {
 
 public struct NetherNetHTTPClient: Sendable {
     public let networkID: UInt64
+    private let identity: HTTPJoinIdentity
     private let peerFactory: @Sendable () throws -> any WebRTCPeer
 
-    public init(library: LibDataChannel, networkID: UInt64 = .random(in: 1...UInt64.max)) {
-        self.init(networkID: networkID) { try library.makePeer(trickleICE: false) }
+    public init(
+        library: LibDataChannel, networkID: UInt64 = .random(in: 1...UInt64.max), identity: HTTPJoinIdentity = .init()
+    ) {
+        self.init(networkID: networkID, identity: identity) { try library.makePeer(trickleICE: false) }
     }
 
     public init(
-        networkID: UInt64 = .random(in: 1...UInt64.max),
+        networkID: UInt64 = .random(in: 1...UInt64.max), identity: HTTPJoinIdentity = .init(),
         peerFactory: @escaping @Sendable () throws -> any WebRTCPeer
     ) {
         self.networkID = networkID
+        self.identity = identity
         self.peerFactory = peerFactory
     }
 
     public func connect(to endpoint: URL, timeout: Duration = .seconds(15)) async throws -> NetherNetConnection {
         guard timeout > .zero else { throw HTTPJoinError.timedOut }
-        let exchange = HTTPExchange(endpoint: try Self.joinURL(endpoint, networkID: networkID))
+        let exchange = HTTPExchange(endpoint: try Self.joinURL(endpoint, networkID: networkID), identity: identity)
         let connection = NetherNetConnection(
             networkID: 0, connectionID: .random(in: 1...UInt64.max), signaling: exchange, peer: try peerFactory()
         )
@@ -80,15 +84,19 @@ public struct NetherNetHTTPClient: Sendable {
 
 private actor HTTPExchange: NetherNetSignaling {
     let endpoint: URL
+    let identity: HTTPJoinIdentity
     weak var connection: NetherNetConnection?
 
-    init(endpoint: URL) { self.endpoint = endpoint }
+    init(endpoint: URL, identity: HTTPJoinIdentity) {
+        self.endpoint = endpoint
+        self.identity = identity
+    }
 
     func bind(_ connection: NetherNetConnection) { self.connection = connection }
 
     func send(_ signal: Signal, to networkID: UInt64) async throws {
         guard signal.kind == .offer else { throw ConnectionError.invalidSignal }
-        let body = Data(signal.data.utf8)
+        let body = Data(try identity.localDescription(signal.data).utf8)
         guard body.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -100,6 +108,7 @@ private actor HTTPExchange: NetherNetSignaling {
         guard let sdp = String(data: bytes, encoding: .utf8), !sdp.isEmpty else { throw HTTPJoinError.invalidAnswer }
         let text = sdp.trimmingCharacters(in: .whitespacesAndNewlines)
         if let code = UInt32(text) { throw HTTPJoinError.rejected(code) }
+        try identity.validateRemote(sdp)
         guard let connection else { throw ConnectionError.closed }
         try await connection.receive(Signal(kind: .answer, connectionID: signal.connectionID, data: sdp))
     }

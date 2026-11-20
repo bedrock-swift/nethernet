@@ -34,3 +34,13 @@ private struct AnsweringPeer: WebRTCPeer {
     func send(_ segments: [[UInt8]], on channel: DataChannel) throws {}
     func close() { stream.continuation.finish() }
 }
+
+@Test func httpListenerRequiresAnIdentityBeforeCreatingAPeerWhenVerificationIsEnabled() async throws {
+    let listener = try NetherNetHTTPListener(identity: HTTPJoinIdentity(verify: { _, _ in })) {
+        throw ConnectionError.invalidSignal
+    }
+    await #expect(throws: SDPIdentityError.missing) {
+        try await listener.answer("offer", from: 42)
+    }
+    await listener.close()
+}

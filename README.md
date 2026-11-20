@@ -13,7 +13,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 ## Features
 
 - LAN discovery and signaling over UDP
-- HTTP join client and listener for unsigned sessions
+- HTTP join client and listener with configurable identity signing and verification
 - WebRTC reliable and unreliable data channels with configurable STUN and TURN servers
 - Fragmentation and reassembly for reliable messages
 - Protocol codecs and a WebRTC interface for custom transports
@@ -36,3 +36,5 @@ swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatacha
 ```
 
 To serve HTTP join through an existing HTTP server, pass the UTF-8 request body and decimal network ID from `POST /v1/join/{networkID}` to `NetherNetHTTPListener.answer(_:from:)`. Return the answer with `Content-Type: application/sdp`. Open WebRTC connections arrive on `listener.connections`.
+
+Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
