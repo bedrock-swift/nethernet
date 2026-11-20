@@ -10,15 +10,17 @@ public struct MinecraftTokenTrust: Sendable {
     public init(jwks: Data) throws {
         let set = try JSONDecoder().decode(KeySet.self, from: jwks)
         var keys: [String: _RSA.Signing.PublicKey] = [:]
-        for key in set.keys where key.kty == "RSA" && (key.alg == nil || key.alg == "RS256") {
-            guard key.use == nil || key.use == "sig" else { continue }
-            guard let id = key.kid, !id.isEmpty, keys[id] == nil,
-                  let modulus = key.n.flatMap(ES384JWS.decode), let exponent = key.e.flatMap(ES384JWS.decode) else {
-                throw NetherNetIdentityError.invalidClaims
+        var ambiguous: Set<String> = []
+        for candidate in set.keys {
+            guard let key = candidate.key, key.kty == "RSA", key.alg == nil || key.alg == "RS256",
+                  key.use == nil || key.use == "sig", let id = key.kid, !id.isEmpty, !ambiguous.contains(id),
+                  let modulus = key.n.flatMap(ES384JWS.decode), let exponent = key.e.flatMap(ES384JWS.decode),
+                  let publicKey = try? _RSA.Signing.PublicKey(n: modulus, e: exponent),
+                  publicKey.keySizeInBits >= 2048 else { continue }
+            if keys.updateValue(publicKey, forKey: id) != nil {
+                keys.removeValue(forKey: id)
+                ambiguous.insert(id)
             }
-            let publicKey = try _RSA.Signing.PublicKey(n: modulus, e: exponent)
-            guard publicKey.keySizeInBits >= 2048 else { throw NetherNetIdentityError.untrustedKey }
-            keys[id] = publicKey
         }
         guard !keys.isEmpty else { throw NetherNetIdentityError.untrustedKey }
         self.keys = keys
@@ -47,7 +49,15 @@ public struct MinecraftTokenTrust: Sendable {
     }
 
     private struct KeySet: Decodable {
-        let keys: [Key]
+        let keys: [Candidate]
+    }
+
+    private struct Candidate: Decodable {
+        let key: Key?
+
+        init(from decoder: any Decoder) {
+            key = try? Key(from: decoder)
+        }
     }
 
     private struct Key: Decodable {

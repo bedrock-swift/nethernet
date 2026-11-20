@@ -14,6 +14,16 @@ import Testing
     let now = Date(timeIntervalSince1970: 1000)
 
     try trust.verify(identity, fingerprintPayload: payload, at: now)
+    let object = try #require(JSONSerialization.jsonObject(with: Data(jwks.utf8)) as? [String: [[String: String]]])
+    let key = try #require(object["keys"]?.first)
+    var duplicate = key
+    duplicate["kid"] = "duplicate"
+    let mixed = try JSONSerialization.data(withJSONObject: [
+        "keys": [false, ["kty": "RSA"], duplicate, key, duplicate, ["kty": "RSA", "kid": "bad", "n": "!"]]
+    ])
+    try MinecraftTokenTrust(jwks: mixed).verify(identity, fingerprintPayload: payload, at: now)
+    let ambiguous = try JSONSerialization.data(withJSONObject: ["keys": [key, key]])
+    #expect(throws: NetherNetIdentityError.untrustedKey) { try MinecraftTokenTrust(jwks: ambiguous) }
     #expect(throws: NetherNetIdentityError.invalidSignature) {
         try trust.verify(identity, fingerprintPayload: Data("different".utf8), at: now)
     }
