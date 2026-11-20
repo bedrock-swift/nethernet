@@ -8,6 +8,7 @@ public struct LANAdvertisement: Equatable, Sendable {
 }
 
 public enum LANError: Error, Equatable {
+    case invalidDiscoveryInterval
     case unknownPeer
     case timedOut
     case tooManyConnections
@@ -111,6 +112,15 @@ public actor NetherNetLAN {
         guard !closed else { throw ConnectionError.closed }
         start()
         try socket.send(discovery.request(), to: endpoint)
+    }
+
+    public func browse(at endpoint: LANAddress = .broadcast, every interval: Duration = .seconds(2)) async throws {
+        guard interval > .zero else { throw LANError.invalidDiscoveryInterval }
+        while !closed {
+            try Task.checkCancellation()
+            try discover(at: endpoint)
+            try await Task.sleep(for: interval)
+        }
     }
 
     public func connect(to remoteID: UInt64, timeout: Duration = .seconds(8)) async throws -> NetherNetConnection {
