@@ -18,6 +18,9 @@ public struct DiscoveryPacket: Equatable, Sendable {
         self.body = body
     }
 
+    private static let messageDataLimit = 1_140
+    private static let messageHeaderSize = 32
+
     private static let key: [UInt8] = {
         var applicationID: [UInt8] = []
         applicationID.appendLE(UInt64(0xdeadbeef))
@@ -26,6 +29,7 @@ public struct DiscoveryPacket: Equatable, Sendable {
 
     public func encode() throws -> [UInt8] {
         var packet: [UInt8] = []
+        var declaredPacketSize: Int?
         switch body {
         case .request: packet.appendLE(UInt16(0))
         case .response: packet.appendLE(UInt16(1))
@@ -47,7 +51,9 @@ public struct DiscoveryPacket: Equatable, Sendable {
             let data = signal.text.utf8
             guard data.count <= 65_440 - 30 else { throw WireError.tooLarge }
             packet.appendLE(recipient)
-            packet.appendLE(UInt32(data.count))
+            let declared = min(data.count, Self.messageDataLimit)
+            declaredPacketSize = Self.messageHeaderSize + declared // header includes the length prefix
+            packet.appendLE(UInt32(declared))
             packet.append(contentsOf: data)
         case let .ping(recipient):
             packet.appendLE(recipient)
@@ -55,7 +61,7 @@ public struct DiscoveryPacket: Equatable, Sendable {
             packet.append(contentsOf: "Ping".utf8)
         }
         var payload: [UInt8] = []
-        payload.appendLE(UInt16(packet.count))
+        payload.appendLE(UInt16(declaredPacketSize ?? packet.count))
         payload += packet
         let tag = try HMAC(key: Self.key, variant: .sha2(.sha256)).authenticate(payload)
         let cipher = try AES(key: Self.key, blockMode: ECB(), padding: .pkcs7)
@@ -94,8 +100,9 @@ public struct DiscoveryPacket: Equatable, Sendable {
         case 2:
             let recipient = try packet.integer(UInt64.self)
             let declared = try packet.integer(UInt32.self)
-            let actual = payload.count - 32
-            let capped = declared == 1_140 && actual > 1_140 && size == 1_172
+            let actual = payload.count - Self.messageHeaderSize
+            let capped = declared == Self.messageDataLimit && actual > Self.messageDataLimit
+                && Int(size) == Self.messageHeaderSize + Self.messageDataLimit
             guard actual >= 0, (normalLength && actual == Int(declared)) || capped,
                   let text = String(validating: try packet.read(actual), as: UTF8.self) else {
                 throw WireError.malformed

@@ -81,3 +81,17 @@ import Testing
     let decoded = try decoder.receive([0] + payload)
     #expect(decoded == payload)
 }
+
+@Test func discoveryCapsDeclaredSignalLengthWithoutTruncatingData() throws {
+    let offer = Signal(kind: .offer, connectionID: 3, data: String(repeating: "a", count: 1_140))
+    let packet = DiscoveryPacket(sender: 1, body: .message(recipient: 2, offer))
+    let expectedTag: [UInt8] = [
+        0xfb, 0x22, 0xb6, 0x12, 0xb9, 0xe2, 0x97, 0xd7,
+        0xe6, 0xf3, 0x73, 0x3d, 0x9a, 0xe1, 0x53, 0xa9,
+        0x64, 0x9e, 0x98, 0x7f, 0x6d, 0xa4, 0x1b, 0xa3,
+        0x81, 0xe1, 0xd2, 0x68, 0xa2, 0xbf, 0x6d, 0x4e
+    ]
+    let encoded = try packet.encode()
+    #expect(Array(encoded.prefix(32)) == expectedTag)
+    #expect(try DiscoveryPacket(decoding: encoded) == packet)
+}
