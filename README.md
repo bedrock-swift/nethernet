@@ -13,6 +13,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 ## Features
 
 - LAN discovery and signaling over UDP
+- Client for dedicated servers that accept unsigned HTTP join offers
 - WebRTC reliable and unreliable data channels
 - Fragmentation and reassembly for reliable messages
 - Protocol codecs and a WebRTC interface for custom transports
@@ -26,4 +27,10 @@ The echo demo uses IPv4 loopback and requires a 64-bit libdatachannel 0.24.3 sha
 ```sh
 swift run nethernet-demo listen 7551 /path/to/libdatachannel
 swift run nethernet-demo dial 7551 /path/to/libdatachannel
+```
+
+To test an HTTP join endpoint that echoes payloads, use `dial-http` with its base URL.
+
+```sh
+swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatachannel
 ```

@@ -1,3 +1,4 @@
+import Foundation
 import NetherNet
 
 enum DemoError: Error {
@@ -7,8 +8,9 @@ enum DemoError: Error {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
-guard arguments.count == 3, let port = UInt16(arguments[1]), port != 0 else {
+guard arguments.count == 3 else {
     print("usage: nethernet-demo listen|dial port /path/to/libdatachannel")
+    print("       nethernet-demo dial-http url /path/to/libdatachannel")
     throw DemoError.usage
 }
 let api = try LibDataChannel(libraryPath: arguments[2])
@@ -16,6 +18,7 @@ let loopback: UInt32 = 0x7f000001
 
 switch arguments[0] {
 case "listen":
+    guard let port = UInt16(arguments[1]), port != 0 else { throw DemoError.usage }
     let data = try ServerData(name: "NetherNet", world: "Echo").encode()
     let listener = try NetherNetLAN(on: LANAddress(address: loopback, port: port), advertisement: data) {
         try api.makePeer()
@@ -32,6 +35,7 @@ case "listen":
         }
     }
 case "dial":
+    guard let port = UInt16(arguments[1]), port != 0 else { throw DemoError.usage }
     let client = try NetherNetLAN(on: LANAddress(address: loopback, port: 0)) { try api.makePeer() }
     try await client.discover(at: LANAddress(address: loopback, port: port))
     let server = try await withThrowingTaskGroup(of: LANAdvertisement.self) { group in
@@ -48,6 +52,19 @@ case "dial":
         return advertisement
     }
     let connection = try await client.connect(to: server.networkID)
+    try await echo(on: connection)
+    await client.close()
+case "dial-http":
+    guard let endpoint = URL(string: arguments[1]) else { throw DemoError.usage }
+    let client = NetherNetHTTPClient(library: api)
+    let connection = try await client.connect(to: endpoint)
+    try await echo(on: connection)
+    await connection.close()
+default:
+    throw DemoError.usage
+}
+
+func echo(on connection: NetherNetConnection) async throws {
     let payload = (0..<20_100).map { UInt8(truncatingIfNeeded: $0) }
     try await connection.send(payload)
     let reply = try await withThrowingTaskGroup(of: [UInt8].self) { group in
@@ -65,7 +82,4 @@ case "dial":
     }
     guard reply == payload else { throw DemoError.mismatch }
     print("Received \(reply.count) echoed bytes")
-    await client.close()
-default:
-    throw DemoError.usage
 }
