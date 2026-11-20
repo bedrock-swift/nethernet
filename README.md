@@ -29,7 +29,7 @@ swift run nethernet-demo listen 7551 /path/to/libdatachannel
 swift run nethernet-demo dial 7551 /path/to/libdatachannel
 ```
 
-To test an HTTP join endpoint that echoes payloads, use `dial-http` with its base URL.
+To test an HTTP join endpoint that echoes payloads, use `dial-http` with its base URL. Append a public DER key to require a signed answer.
 
 ```sh
 swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatachannel

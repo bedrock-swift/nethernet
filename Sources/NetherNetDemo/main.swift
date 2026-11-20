@@ -8,9 +8,9 @@ enum DemoError: Error {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
-guard arguments.count == 3 else {
+guard arguments.count == 3 || arguments.count == 4 && arguments.first == "dial-http" else {
     print("usage: nethernet-demo listen|dial port /path/to/libdatachannel")
-    print("       nethernet-demo dial-http url /path/to/libdatachannel")
+    print("       nethernet-demo dial-http url /path/to/libdatachannel [server-key.der]")
     throw DemoError.usage
 }
 let api = try LibDataChannel(libraryPath: arguments[2])
@@ -56,7 +56,14 @@ case "dial":
     await client.close()
 case "dial-http":
     guard let endpoint = URL(string: arguments[1]) else { throw DemoError.usage }
-    let client = NetherNetHTTPClient(library: api)
+    let identity: HTTPJoinIdentity
+    if arguments.count == 4 {
+        let key = try Data(contentsOf: URL(fileURLWithPath: arguments[3]))
+        identity = HTTPJoinIdentity(verify: try NetherNetSigningKey.verifier(pinning: key))
+    } else {
+        identity = HTTPJoinIdentity()
+    }
+    let client = NetherNetHTTPClient(library: api, identity: identity)
     let connection = try await client.connect(to: endpoint)
     try await echo(on: connection)
     await connection.close()

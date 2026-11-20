@@ -100,10 +100,9 @@ private actor HTTPExchange: NetherNetSignaling {
         guard body.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.httpBody = body
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.setValue("libhttpclient/1.0.0.0", forHTTPHeaderField: "User-Agent")
-        let (status, bytes) = try await HTTPBody.load(request)
+        let (status, bytes) = try await HTTPBody.load(request, upload: body)
         guard (200..<300).contains(status) else { throw HTTPJoinError.status(status) }
         guard let sdp = String(data: bytes, encoding: .utf8), !sdp.isEmpty else { throw HTTPJoinError.invalidAnswer }
         let text = sdp.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -122,10 +121,15 @@ private final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Senda
 
     init(output: AsyncThrowingStream<Response, any Error>.Continuation) { self.output = output }
 
-    static func load(_ request: URLRequest) async throws -> Response {
+    static func load(_ request: URLRequest, upload: Data? = nil) async throws -> Response {
         let stream = AsyncThrowingStream<Response, any Error>.makeStream()
         let session = URLSession(configuration: .ephemeral, delegate: HTTPBody(output: stream.continuation), delegateQueue: nil)
-        let task = session.dataTask(with: request)
+        let task: URLSessionDataTask
+        if let upload {
+            task = session.uploadTask(with: request, from: upload)
+        } else {
+            task = session.dataTask(with: request)
+        }
         defer { session.finishTasksAndInvalidate() }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
