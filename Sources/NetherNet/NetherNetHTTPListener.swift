@@ -7,6 +7,7 @@ public actor NetherNetHTTPListener {
     private let maximumConnections: Int
     private var sessions: [UInt64: NetherNetConnection] = [:]
     private var closed = false
+    private var verifying = 0
 
     public init(
         library: LibDataChannel, maximumConnections: Int = 64, identity: HTTPJoinIdentity = .init()
@@ -39,15 +40,26 @@ public actor NetherNetHTTPListener {
             if await connection.isClosed { sessions.removeValue(forKey: id) }
         }
         guard !closed else { throw ConnectionError.closed }
-        guard sessions.count < maximumConnections else { throw HTTPJoinError.tooManyConnections }
+        guard sessions.count + verifying < maximumConnections else { throw HTTPJoinError.tooManyConnections }
+
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        verifying += 1
+        do {
+            try await identity.validateRemote(offer)
+        } catch {
+            verifying -= 1
+            throw error
+        }
+        verifying -= 1
+        try Task.checkCancellation()
+        guard !closed else { throw ConnectionError.closed }
+        guard .now < deadline else { throw HTTPJoinError.timedOut }
 
         var id = UInt64.random(in: 1...UInt64.max)
         while sessions[id] != nil { id = .random(in: 1...UInt64.max) }
-        try identity.validateRemote(offer)
         let exchange = HTTPAnswerExchange(identity: identity)
         let connection = NetherNetConnection(networkID: networkID, connectionID: id, signaling: exchange, peer: try peerFactory())
         sessions[id] = connection
-        let deadline = ContinuousClock.now.advanced(by: timeout)
         do {
             try await connection.receive(Signal(kind: .offer, connectionID: id, data: offer))
             let sdp = try await waitForAnswer(exchange, connection: connection, until: deadline)

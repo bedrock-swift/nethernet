@@ -41,3 +41,4 @@ Pass `HTTPJoinIdentity` to attach a signer or require verification. The callback
 
 Use `NetherNetSigningKey` for self-signed identity. Persist its PEM across restarts and pin its public DER key on clients you control.
 Use `MinecraftTokenTrust` with a trusted Minecraft JWKS to verify player tokens and SDP fingerprints.
+Use `MinecraftKeySet` to fetch and refresh the issuer keys over HTTPS. Pass its async verifier to `HTTPJoinIdentity`.

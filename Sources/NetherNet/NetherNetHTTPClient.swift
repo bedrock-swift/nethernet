@@ -107,13 +107,14 @@ private actor HTTPExchange: NetherNetSignaling {
         guard let sdp = String(data: bytes, encoding: .utf8), !sdp.isEmpty else { throw HTTPJoinError.invalidAnswer }
         let text = sdp.trimmingCharacters(in: .whitespacesAndNewlines)
         if let code = UInt32(text) { throw HTTPJoinError.rejected(code) }
-        try identity.validateRemote(sdp)
+        try await identity.validateRemote(sdp)
+        try Task.checkCancellation()
         guard let connection else { throw ConnectionError.closed }
         try await connection.receive(Signal(kind: .answer, connectionID: signal.connectionID, data: sdp))
     }
 }
 
-private final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class HTTPBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     typealias Response = (Int, Data)
     let output: AsyncThrowingStream<Response, any Error>.Continuation
     private var status: Int?

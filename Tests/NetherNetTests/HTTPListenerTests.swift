@@ -44,3 +44,28 @@ private struct AnsweringPeer: WebRTCPeer {
     }
     await listener.close()
 }
+
+@Test(.timeLimit(.minutes(1))) func httpListenerCountsVerificationAgainstAdmission() async throws {
+    let entered = AsyncStream<Void>.makeStream()
+    let unblock = AsyncStream<Void>.makeStream()
+    let verifier = HTTPJoinIdentity(verify: { _, _ in
+        entered.continuation.yield(())
+        for await _ in unblock.stream { break }
+    })
+    let listener = try NetherNetHTTPListener(maximumConnections: 1, identity: verifier) { AnsweringPeer() }
+    let peer = try SDPIdentity(domain: "test", token: "e30.e30.AA", fingerprintSignature: "e30..AA")
+    let offer = try peer.adding(to: "v=0\r\na=fingerprint:sha-256 AB:CD\r\n")
+    let first = Task { try await listener.answer(offer, from: 1) }
+    defer {
+        unblock.continuation.finish()
+        first.cancel()
+    }
+    var events = entered.stream.makeAsyncIterator()
+    _ = await events.next()
+    await #expect(throws: HTTPJoinError.tooManyConnections) {
+        try await listener.answer(offer, from: 2)
+    }
+    await listener.close()
+    unblock.continuation.finish()
+    await #expect(throws: ConnectionError.closed) { try await first.value }
+}
