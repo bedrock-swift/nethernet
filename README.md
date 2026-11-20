@@ -20,7 +20,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 
 ## Development
 
-Build with Swift 6 and run `swift test`.
+Build with Swift 6.1 or later and run `swift test`.
 
 The echo demo uses IPv4 loopback and requires a 64-bit libdatachannel 0.24.3 shared library. Make its runtime dependencies available to the system loader, then run the server and client in separate terminals.
 
@@ -38,3 +38,5 @@ swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatacha
 To serve HTTP join through an existing HTTP server, pass the UTF-8 request body and decimal network ID from `POST /v1/join/{networkID}` to `NetherNetHTTPListener.answer(_:from:)`. Return the answer with `Content-Type: application/sdp`. Open WebRTC connections arrive on `listener.connections`.
 
 Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
+
+Use `NetherNetSigningKey` for self-signed identity. Persist its PEM across restarts and pin its public DER key on clients you control.

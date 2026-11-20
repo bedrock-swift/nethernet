@@ -58,7 +58,7 @@ public struct ES384JWS: Equatable, Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private static func decode(_ data: String) -> Data? {
+    static func decode(_ data: String) -> Data? {
         var base64 = data.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         base64 += String(repeating: "=", count: (4 - base64.utf8.count % 4) % 4)
         guard let decoded = Data(base64Encoded: base64), encode(decoded) == data else { return nil }
