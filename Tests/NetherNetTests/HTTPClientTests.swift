@@ -10,3 +10,12 @@ import Testing
     let invalid = try #require(URL(string: "https://127.0.0.1:19132/other"))
     #expect(throws: HTTPJoinError.invalidEndpoint) { try NetherNetHTTPClient.joinURL(invalid, networkID: 1) }
 }
+
+@Test func httpStatusMatchesTheBedrockJSONFields() throws {
+    let body = #"{"name":"Server","protocol":0,"version":"","level":"World","players":1,"maxPlayers":8,"gameType":0}"#
+    let status = try JSONDecoder().decode(HTTPServerStatus.self, from: Data(body.utf8))
+    #expect(status == HTTPServerStatus(
+        name: "Server", world: "World", protocolVersion: 0, version: "",
+        players: 1, capacity: 8, gameMode: 0
+    ))
+}

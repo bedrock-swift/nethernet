@@ -51,14 +51,27 @@ public struct NetherNetHTTPClient: Sendable {
         }
     }
 
+    public func status(at endpoint: URL) async throws -> HTTPServerStatus? {
+        let url = try Self.endpointURL(endpoint, path: "/v1/join")
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (status, bytes) = try await HTTPBody.load(request)
+        guard (200..<300).contains(status) else { throw HTTPJoinError.status(status) }
+        return bytes.isEmpty ? nil : try JSONDecoder().decode(HTTPServerStatus.self, from: bytes)
+    }
+
     static func joinURL(_ endpoint: URL, networkID: UInt64) throws -> URL {
+        try endpointURL(endpoint, path: "/v1/join/" + String(networkID))
+    }
+
+    private static func endpointURL(_ endpoint: URL, path: String) throws -> URL {
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true),
               let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil,
               components.query == nil, components.fragment == nil,
               components.path.isEmpty || components.path == "/" else { throw HTTPJoinError.invalidEndpoint }
-        components.path = "/v1/join/\(networkID)"
+        components.path = path
         guard let url = components.url else { throw HTTPJoinError.invalidEndpoint }
         return url
     }
