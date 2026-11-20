@@ -19,7 +19,7 @@ let loopback: UInt32 = 0x7f000001
 switch arguments[0] {
 case "listen":
     guard let port = UInt16(arguments[1]), port != 0 else { throw DemoError.usage }
-    let data = try ServerData(name: "NetherNet", world: "Echo").encode()
+    let data = try ServerData(name: "NetherNet", world: "Echo").encode(version: .v7)
     let listener = try NetherNetLAN(on: LANAddress(address: loopback, port: port), advertisement: data) {
         try api.makePeer()
     }
