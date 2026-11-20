@@ -6,6 +6,7 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 
 [![Swift 6](https://img.shields.io/badge/Swift-6-orange?style=flat-square&logo=swift)](https://www.swift.org)
 [![NetherNet transport](https://img.shields.io/badge/transport-NetherNet-black?style=flat-square)](#features)
+[![MIT license](https://img.shields.io/github/license/bedrock-swift/nethernet?style=flat-square)](LICENSE)
 
 </div>
 
