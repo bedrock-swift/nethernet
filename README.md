@@ -1,6 +1,13 @@
+<div align="center">
+
 # NetherNet
 
 A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
+
+[![Swift 6](https://img.shields.io/badge/Swift-6-orange?style=flat-square&logo=swift)](https://www.swift.org)
+[![NetherNet transport](https://img.shields.io/badge/transport-NetherNet-black?style=flat-square)](#features)
+
+</div>
 
 ## Features
 
