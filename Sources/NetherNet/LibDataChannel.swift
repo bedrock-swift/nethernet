@@ -12,6 +12,7 @@ public enum WebRTCError: Error, Equatable {
     case missingSymbol(String)
     case unsupportedArchitecture
     case invalidICEServer
+    case invalidBufferLimit
     case connectionFailed
     case native(Int32)
 }
@@ -24,9 +25,11 @@ private typealias MessageCallback = @convention(c) (Int32, UnsafePointer<CChar>?
 
 public final class LibDataChannel: @unchecked Sendable {
     private let symbols: [String: UnsafeMutableRawPointer]
+    fileprivate let maximumBufferedAmount: Int
 
-    public init(libraryPath: String) throws {
+    public init(libraryPath: String, maximumBufferedAmount: Int = 4 * 1024 * 1024) throws {
         guard MemoryLayout<Int>.size == 8 else { throw WebRTCError.unsupportedArchitecture }
+        guard maximumBufferedAmount > 0, maximumBufferedAmount <= Int(Int32.max) else { throw WebRTCError.invalidBufferLimit }
         #if os(Windows)
         guard let handle = Array(libraryPath.utf16 + [0]).withUnsafeBufferPointer({ LoadLibraryW($0.baseAddress) }) else {
             throw WebRTCError.libraryUnavailable(libraryPath)
@@ -42,7 +45,8 @@ public final class LibDataChannel: @unchecked Sendable {
             "rtcSetLocalDescription", "rtcSetRemoteDescription", "rtcAddRemoteCandidate",
             "rtcSetStateChangeCallback", "rtcSetGatheringStateChangeCallback", "rtcGetLocalDescription", "rtcGetLocalDescriptionType",
             "rtcCreateDataChannel", "rtcCreateDataChannelEx", "rtcDeleteDataChannel", "rtcGetDataChannelLabel",
-            "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetMessageCallback", "rtcIsOpen", "rtcSendMessage"
+            "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetMessageCallback", "rtcIsOpen",
+            "rtcGetBufferedAmount", "rtcSendMessage"
         ]
         var resolved: [String: UnsafeMutableRawPointer] = [:]
         for name in names {
@@ -61,6 +65,7 @@ public final class LibDataChannel: @unchecked Sendable {
             #endif
         }
         symbols = resolved
+        self.maximumBufferedAmount = maximumBufferedAmount
     }
 
     public func makePeer() throws -> any WebRTCPeer {
@@ -308,9 +313,16 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
     func send(_ segments: [[UInt8]], on channel: DataChannel) throws {
         try lock.withLock {
             guard !closed, let id = context.id(for: channel) else { throw ConnectionError.notOpen }
-            let send = context.api.function("rtcSendMessage", as: (@convention(c) (Int32, UnsafePointer<CChar>?, Int32) -> Int32).self)
+            let api = context.api
+            let bufferedAmount = api.function("rtcGetBufferedAmount", as: (@convention(c) (Int32) -> Int32).self)
+            var remaining = api.maximumBufferedAmount - Int(try Self.checked(bufferedAmount(id)))
             for segment in segments {
                 guard (1...10_001).contains(segment.count) else { throw WireError.tooLarge }
+                guard segment.count <= remaining else { throw ConnectionError.sendQueueFull }
+                remaining -= segment.count
+            }
+            let send = api.function("rtcSendMessage", as: (@convention(c) (Int32, UnsafePointer<CChar>?, Int32) -> Int32).self)
+            for segment in segments {
                 try segment.withUnsafeBytes {
                     _ = try Self.checked(send(id, $0.baseAddress?.assumingMemoryBound(to: CChar.self), Int32($0.count)))
                 }

@@ -45,18 +45,34 @@ import Testing
     await #expect(throws: WebRTCError.connectionFailed) { try await connection.checkOpen() }
 }
 
+@Test func sendQueuePressureKeepsTheConnectionOpen() async throws {
+    let peer = StubPeer(sendError: .sendQueueFull)
+    let connection = NetherNetConnection(networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer)
+    try await connection.start()
+    peer.open()
+    try await connection.waitForHTTPChannels(until: .now.advanced(by: .seconds(1)))
+    await #expect(throws: ConnectionError.sendQueueFull) { try await connection.send([42]) }
+    #expect(await connection.isOpen)
+    await connection.close()
+}
+
 private struct StubSignaling: NetherNetSignaling {
     func send(_ signal: Signal, to networkID: UInt64) async throws {}
 }
 
 private struct StubPeer: WebRTCPeer {
     private let stream = AsyncStream<PeerEvent>.makeStream()
+    var sendError: ConnectionError?
     var events: AsyncStream<PeerEvent> { stream.stream }
 
     func offer() throws {}
     func remoteDescription(_ sdp: String, kind: Signal.Kind) throws {}
     func remoteCandidate(_ candidate: String) throws {}
-    func send(_ segments: [[UInt8]], on channel: DataChannel) throws {}
+    func send(_ segments: [[UInt8]], on channel: DataChannel) throws { if let sendError { throw sendError } }
+    func open() {
+        stream.continuation.yield(.open(.reliable))
+        stream.continuation.yield(.open(.unreliable))
+    }
     func close() { stream.continuation.finish() }
     func fail() { stream.continuation.yield(.failed(WebRTCError.connectionFailed)) }
 }

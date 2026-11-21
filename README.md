@@ -20,6 +20,8 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 
 ## Development
 
+The native send buffer defaults to 4 MiB per data channel. Configure it with `LibDataChannel(libraryPath:maximumBufferedAmount:)`. A send that would exceed the limit throws `ConnectionError.sendQueueFull` before queuing any fragments. The connection remains open so the caller can retry.
+
 Build with Swift 6.1 or later and run `swift test`.
 
 The echo demo uses IPv4 loopback and requires a 64-bit libdatachannel 0.24.3 shared library. Make its runtime dependencies available to the system loader, then run the server and client in separate terminals.

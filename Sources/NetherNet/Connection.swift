@@ -27,6 +27,7 @@ public enum ConnectionError: Error, Equatable {
     case notOpen
     case closed
     case overflow
+    case sendQueueFull
 }
 
 public actor NetherNetConnection {
@@ -125,7 +126,11 @@ public actor NetherNetConnection {
     public func send(_ payload: [UInt8], on channel: DataChannel = .reliable) throws {
         guard isOpen else { throw ConnectionError.notOpen }
         let segments = try MessageCodec.encode(payload, reliable: channel == .reliable)
-        do { try peer.send(segments, on: channel) } catch {
+        do {
+            try peer.send(segments, on: channel)
+        } catch ConnectionError.sendQueueFull {
+            throw ConnectionError.sendQueueFull
+        } catch {
             finish(error)
             throw error
         }
