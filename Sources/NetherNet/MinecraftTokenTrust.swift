@@ -27,6 +27,10 @@ public struct MinecraftTokenTrust: Sendable {
     }
 
     public func verify(_ identity: SDPIdentity, fingerprintPayload: Data, at now: Date = .now) throws {
+        _ = try authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: now)
+    }
+
+    public func authenticatedKey(for identity: SDPIdentity, fingerprintPayload: Data, at now: Date = .now) throws -> [UInt8] {
         let jws = try CompactJWS(compact: identity.token)
         guard jws.header.alg == "RS256" else { throw ES384JWS.FormatError.unsupportedHeader }
         let signature = _RSA.Signing.RSASignature(rawRepresentation: jws.signature)
@@ -47,6 +51,7 @@ public struct MinecraftTokenTrust: Sendable {
         guard claims.iss == Self.issuer, claims.aud.contains(Self.audience), !claims.sub.isEmpty,
               (claims.nbf ?? time) <= time + skew else { throw NetherNetIdentityError.invalidClaims }
         try NetherNetSigningKey.verifyFingerprint(identity, payload: fingerprintPayload, key: claims.cpk.key)
+        return Array(claims.cpk.key.derRepresentation)
     }
 
     private struct KeySet: Decodable {

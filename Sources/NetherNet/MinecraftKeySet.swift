@@ -46,17 +46,21 @@ public actor MinecraftKeySet {
     }
 
     func verify(_ identity: SDPIdentity, fingerprintPayload: Data, at date: Date) async throws {
+        _ = try await authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
+    }
+
+    public func authenticatedKey(for identity: SDPIdentity, fingerprintPayload: Data, at date: Date = .now) async throws -> [UInt8] {
         let age = lastRefresh.duration(to: now())
         if age >= .seconds(21600) {
             guard let task = startRefresh() else { throw MinecraftKeySetError.unavailable }
             let refreshed = try await task.value
             try Task.checkCancellation()
-            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
-            return
+            return try refreshed.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
         }
         do {
-            try trust.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
+            let key = try trust.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
             if age >= .seconds(3600) { _ = startRefresh() }
+            return key
         } catch NetherNetIdentityError.untrustedKey {
             guard let task = startRefresh() else {
                 if refreshFailed { throw MinecraftKeySetError.unavailable }
@@ -64,7 +68,7 @@ public actor MinecraftKeySet {
             }
             let refreshed = try await task.value
             try Task.checkCancellation()
-            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
+            return try refreshed.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
         }
     }
 

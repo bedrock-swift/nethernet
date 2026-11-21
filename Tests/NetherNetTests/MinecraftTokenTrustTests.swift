@@ -14,7 +14,11 @@ import Testing
     let payload = Data("fingerprint".utf8)
     let now = Date(timeIntervalSince1970: 1000)
 
-    try trust.verify(identity, fingerprintPayload: payload, at: now)
+    let authenticatedKey = try trust.authenticatedKey(for: identity, fingerprintPayload: payload, at: now)
+    let expectedKey = try #require(Data(base64Encoded:
+        "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE1etgK5s6PDkrIhCimYKp0GzlIlJPo3RUY8rKbCUKEGUeKhrvidia4fahlmf8IeLrGqjH2L7/2rVhbhXo+d7hXAtCimc5y6FC5FaGJIB78mIPSWivnwW2AVJIXoatDmPf"
+    ))
+    #expect(authenticatedKey == Array(expectedKey))
     let segments = token.split(separator: ".", omittingEmptySubsequences: false)
     for algorithm in ["none", "HS256"] {
         let header = try JSONEncoder().encode(["alg": algorithm, "kid": "test"])
