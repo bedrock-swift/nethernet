@@ -122,13 +122,13 @@ private let callbacks = CallbackRegistry()
 
 private final class ChannelContext: @unchecked Sendable {
     let api: LibDataChannel
-    let output: AsyncStream<PeerEvent>.Continuation
+    let output: NativePeerEvents
     private let lock = NSLock()
     private var channels: [DataChannel: Int32] = [:]
     private var channelIDs: [Int32] = []
     private var closing = false
 
-    init(api: LibDataChannel, output: AsyncStream<PeerEvent>.Continuation) {
+    init(api: LibDataChannel, output: NativePeerEvents) {
         self.api = api
         self.output = output
     }
@@ -158,7 +158,7 @@ private final class ChannelContext: @unchecked Sendable {
     }
 
     func yield(_ event: PeerEvent) {
-        if case .dropped = output.yield(event) { output.finish() }
+        output.yield(event)
     }
 
     func channel(_ id: Int32) -> DataChannel? {
@@ -241,9 +241,9 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
             return try Self.checked(create(UnsafeRawPointer(config)))
         }
 
-        let stream = AsyncStream<PeerEvent>.makeStream(bufferingPolicy: .bufferingOldest(256))
-        events = stream.stream
-        context = ChannelContext(api: api, output: stream.continuation)
+        let output = NativePeerEvents()
+        events = output.stream
+        context = ChannelContext(api: api, output: output)
         callbacks.add(context, for: peerID)
         api.useCallbacks(for: peerID)
         let onChannel = api.function("rtcSetDataChannelCallback", as: (@convention(c) (Int32, ChannelCallback?) -> Int32).self)
