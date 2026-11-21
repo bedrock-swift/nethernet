@@ -78,14 +78,14 @@ private struct AnsweringPeer: WebRTCPeer {
         players: 1, capacity: 8, gameMode: 0
     )
     let handler = NetherNetHTTPHandler(listener: listener, status: status)
-    let statusResponse = await handler.handle(method: "GET", path: "/v1/join")
+    let statusResponse = await handler.handle(method: "GET", path: "/v1/join?version=1.26.60&protocol=2225&id=42")
     #expect(statusResponse.statusCode == 200)
     #expect(statusResponse.contentType == "application/json")
     #expect(try JSONDecoder().decode(HTTPServerStatus.self, from: statusResponse.body) == status)
 
-    let malformed = await handler.handle(method: "POST", path: "/v1/join/+42", body: Data("offer".utf8))
+    let malformed = await handler.handle(method: "POST", path: "/v1/join/+42?version=1.26.60", body: Data("offer".utf8))
     #expect(malformed.statusCode == 400)
-    let answer = await handler.handle(method: "POST", path: "/v1/join/42", body: Data("offer".utf8))
+    let answer = await handler.handle(method: "POST", path: "/v1/join/42?version=1.26.60", body: Data("offer".utf8))
     #expect(answer.statusCode == 200)
     #expect(answer.contentType == "application/sdp")
     #expect(answer.body == Data("answer".utf8))

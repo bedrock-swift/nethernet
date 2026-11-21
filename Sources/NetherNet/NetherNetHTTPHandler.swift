@@ -34,6 +34,7 @@ public actor NetherNetHTTPHandler {
 
     public func handle(method: String, path: String, body: Data = Data()) async -> HTTPJoinResponse {
         guard !closed else { return HTTPJoinResponse(503) }
+        let path = path.prefix { $0 != "?" }
         if path == "/v1/join" {
             guard method == "GET" else { return HTTPJoinResponse(405) }
             guard let status else { return HTTPJoinResponse(200) }
