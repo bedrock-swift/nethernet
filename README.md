@@ -37,6 +37,8 @@ swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatacha
 
 Mount `NetherNetHTTPHandler` in an HTTP server to serve `GET /v1/join` and `POST /v1/join/{networkID}`. Pass the request method, path and body to `handle`, then return its status, content type and body. Open WebRTC connections arrive on `handler.connections`.
 
+Pass the HTTP peer address as `source` to limit connections per IPv4 address or IPv6 /64. Use the address from the socket or an address validated by a trusted proxy.
+
 Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
 
 Use `NetherNetSigningKey` for self-signed identity. Persist its PEM across restarts and pin its public DER key on clients you control.

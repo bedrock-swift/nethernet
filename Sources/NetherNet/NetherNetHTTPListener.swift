@@ -1,56 +1,94 @@
+public enum HTTPJoinSource: Sendable {
+    case ipv4(UInt32)
+    case ipv6(high: UInt64, low: UInt64)
+
+    fileprivate var network: JoinNetwork {
+        switch self {
+        case .ipv4(let address):
+            .ipv4(address)
+        case .ipv6(let high, let low) where high == 0 && low >> 32 == 0xffff:
+            .ipv4(UInt32(truncatingIfNeeded: low))
+        case .ipv6(let high, _):
+            .ipv6Prefix(high)
+        }
+    }
+}
+
+private enum JoinNetwork: Hashable {
+    case ipv4(UInt32)
+    case ipv6Prefix(UInt64)
+}
+
 public actor NetherNetHTTPListener {
+    private struct Session {
+        let connection: NetherNetConnection
+        let network: JoinNetwork?
+    }
+
     public nonisolated let connections: AsyncStream<NetherNetConnection>
 
     private let output: AsyncStream<NetherNetConnection>.Continuation
     private let peerFactory: @Sendable () throws -> any WebRTCPeer
     private let identity: HTTPJoinIdentity
     private let maximumConnections: Int
-    private var sessions: [UInt64: NetherNetConnection] = [:]
+    private let maximumConnectionsPerSource: Int
+    private var sessions: [UInt64: Session] = [:]
     private var closed = false
     private var verifying = 0
+    private var verifyingByNetwork: [JoinNetwork: Int] = [:]
 
     public init(
-        library: LibDataChannel, maximumConnections: Int = 64, identity: HTTPJoinIdentity = .init()
+        library: LibDataChannel, maximumConnections: Int = 64, maximumConnectionsPerSource: Int = 8,
+        identity: HTTPJoinIdentity = .init()
     ) throws {
-        try self.init(maximumConnections: maximumConnections, identity: identity) { try library.makePeer(trickleICE: false) }
+        try self.init(maximumConnections: maximumConnections, maximumConnectionsPerSource: maximumConnectionsPerSource,
+                      identity: identity) { try library.makePeer(trickleICE: false) }
     }
 
     public init(
-        maximumConnections: Int = 64, identity: HTTPJoinIdentity = .init(),
+        maximumConnections: Int = 64, maximumConnectionsPerSource: Int = 8, identity: HTTPJoinIdentity = .init(),
         peerFactory: @escaping @Sendable () throws -> any WebRTCPeer
     ) throws {
-        guard maximumConnections > 0 else { throw HTTPJoinError.invalidConnectionLimit }
+        guard maximumConnections > 0, maximumConnectionsPerSource > 0 else { throw HTTPJoinError.invalidConnectionLimit }
         let stream = AsyncStream<NetherNetConnection>.makeStream(bufferingPolicy: .bufferingOldest(maximumConnections))
         connections = stream.stream
         output = stream.continuation
         self.peerFactory = peerFactory
         self.maximumConnections = maximumConnections
+        self.maximumConnectionsPerSource = maximumConnectionsPerSource
         self.identity = identity
     }
 
     deinit { output.finish() }
 
-    public func answer(_ offer: String, from networkID: UInt64, timeout: Duration = .seconds(15)) async throws -> String {
+    public func answer(
+        _ offer: String, from networkID: UInt64, source: HTTPJoinSource? = nil, timeout: Duration = .seconds(15)
+    ) async throws -> String {
         guard !offer.isEmpty else { throw HTTPJoinError.invalidOffer }
         guard offer.utf8.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
         guard timeout > .zero else { throw HTTPJoinError.timedOut }
         try Task.checkCancellation()
 
-        for (id, connection) in sessions {
-            if await connection.isClosed { sessions.removeValue(forKey: id) }
+        for (id, session) in sessions {
+            if await session.connection.isClosed { sessions.removeValue(forKey: id) }
         }
         guard !closed else { throw ConnectionError.closed }
         guard sessions.count + verifying < maximumConnections else { throw HTTPJoinError.tooManyConnections }
 
+        let network = source?.network
+        if let network {
+            let active = sessions.values.lazy.filter { $0.network == network }.count
+            guard active + verifyingByNetwork[network, default: 0] < maximumConnectionsPerSource else {
+                throw HTTPJoinError.tooManyConnections
+            }
+            verifyingByNetwork[network, default: 0] += 1
+        }
         let deadline = ContinuousClock.now.advanced(by: timeout)
         verifying += 1
         do {
+            defer { endVerification(on: network) }
             try await identity.validateRemote(offer)
-        } catch {
-            verifying -= 1
-            throw error
         }
-        verifying -= 1
         try Task.checkCancellation()
         guard !closed else { throw ConnectionError.closed }
         guard .now < deadline else { throw HTTPJoinError.timedOut }
@@ -59,7 +97,7 @@ public actor NetherNetHTTPListener {
         while sessions[id] != nil { id = .random(in: 1...UInt64.max) }
         let exchange = HTTPAnswerExchange(identity: identity)
         let connection = NetherNetConnection(networkID: networkID, connectionID: id, signaling: exchange, peer: try peerFactory())
-        sessions[id] = connection
+        sessions[id] = Session(connection: connection, network: network)
         do {
             try await connection.receive(Signal(kind: .offer, connectionID: id, data: offer))
             let sdp = try await waitForAnswer(exchange, connection: connection, until: deadline)
@@ -75,9 +113,15 @@ public actor NetherNetHTTPListener {
         guard !closed else { return }
         closed = true
         output.finish()
-        let active = Array(sessions.values)
+        let active = sessions.values.map(\.connection)
         sessions.removeAll()
         for connection in active { await connection.close() }
+    }
+
+    private func endVerification(on network: JoinNetwork?) {
+        verifying -= 1
+        guard let network, let count = verifyingByNetwork[network] else { return }
+        verifyingByNetwork[network] = count > 1 ? count - 1 : nil
     }
 
     private func waitForAnswer(

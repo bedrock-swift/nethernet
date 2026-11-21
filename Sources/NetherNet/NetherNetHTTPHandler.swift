@@ -32,7 +32,7 @@ public actor NetherNetHTTPHandler {
         await listener.close()
     }
 
-    public func handle(method: String, path: String, body: Data = Data()) async -> HTTPJoinResponse {
+    public func handle(method: String, path: String, body: Data = Data(), source: HTTPJoinSource? = nil) async -> HTTPJoinResponse {
         guard !closed else { return HTTPJoinResponse(503) }
         let path = path.prefix { $0 != "?" }
         if path == "/v1/join" {
@@ -52,7 +52,7 @@ public actor NetherNetHTTPHandler {
         guard !body.isEmpty, let offer = String(data: body, encoding: .utf8) else { return HTTPJoinResponse(400) }
 
         do {
-            let answer = try await listener.answer(offer, from: networkID)
+            let answer = try await listener.answer(offer, from: networkID, source: source)
             return HTTPJoinResponse(200, contentType: "application/sdp", body: Data(answer.utf8))
         } catch HTTPJoinError.tooManyConnections, ConnectionError.closed, MinecraftKeySetError.unavailable, is CancellationError {
             return HTTPJoinResponse(503)
