@@ -1,8 +1,9 @@
 import Foundation
-import NetherNet
+@testable import NetherNet
+import Synchronization
 import Testing
 
-@Test func minecraftTokenVerifiesIssuerSignatureClaimsAndSDPBinding() throws {
+@Test func minecraftTokenVerifiesIssuerSignatureClaimsAndSDPBinding() async throws {
     let jwks = #"{"keys":[{"kty":"RSA","n":"pTUuCaZ1FJutp8a0ksSrjy4dT4_sQi7mXsSzxUKsJ4Shob7ihAzzOihIRbhCDz8h-EWci6Dv8d-lsw9iV7AeBxs6jIgEX7fdyJgfMu9coeGD0z90kY2V9DzssrIuhLuoVC5QJ55e0fOyXtK4ZUIJXC206rHx2kYm1kKOcPnuwDNBJvNCKxyWejfnIIxnXqqPPeytKMmnhtuIDfzA7DIAo9UkpqhtTWI23AHp5y6fOk3QStrVRm5uLTAxSotSOKdfry6E_qxHXLEoWZvdcJy0v4VUkiWcB1waOQVHgQrvEMdgH2kdBFaK7tPjV1sFc_akrnYvTZnGJe6xgSZKUxeI9w","e":"AQAB","kid":"test","alg":"RS256","use":"sig"}]}"#
     let fingerprintSignature = "eyJhbGciOiJFUzM4NCJ9..BaiAxeOJA1V0l51OeIeFShUxD1HsG96sWwsXAHaQGh1MHFMCHaLn1jJdMDXqTC5OTYXPc6KrwLUdE4Ye6u31NM2tDeL7CgPXyR0VaB5nklESsn4aDHAwwd_b5umcvLVM"
     let token = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QifQ.eyJpc3MiOiJodHRwczovL2F1dGhvcml6YXRpb24uZnJhbmNoaXNlLm1pbmVjcmFmdC1zZXJ2aWNlcy5uZXQvIiwiYXVkIjpbImFwaTovL2F1dGgtbWluZWNyYWZ0LXNlcnZpY2VzL211bHRpcGxheWVyIl0sInN1YiI6InRlc3QtcGxheWVyIiwiZXhwIjoyMDAwLCJjcGsiOiJNSFl3RUFZSEtvWkl6ajBDQVFZRks0RUVBQ0lEWWdBRTFldGdLNXM2UERrckloQ2ltWUtwMEd6bElsSlBvM1JVWThyS2JDVUtFR1VlS2hydmlkaWE0ZmFobG1mOEllTHJHcWpIMkw3LzJyVmhiaFhvK2Q3aFhBdENpbWM1eTZGQzVGYUdKSUI3OG1JUFNXaXZud1cyQVZKSVhvYXREbVBmIn0.ZHAqPxyCkEtWKJRpfjbZwODJmA-nq29rLxBGCuZaArCbIQuhbeR_Ui4Mn3lk-r8_hNvko6r4tdMbZr1QH1yqy9ETPduYD4Nom88fbIJftIjAURMaCd466QDWHgDjgJSdhLIqh3us3xwNvmI_GLFNHZGkCAX_pijh6JPmmiCROamybrCh4HKS2Ke49NNO5c50dWcVUJ4tCkXWBx-OA6CC8VGee7H62fYlP5CJZZ0087Yu9Gh-vSot97bZA3Res0NJgrJV49E4fNjN5jXaEkOjNCcZncmVHDxutsDEsO-mypQieAcwZuOa2kDh4lb7bENNgwJl-si1WS43dON3FXk9PA"
@@ -33,4 +34,26 @@ import Testing
     #expect(throws: NetherNetIdentityError.invalidClaims) {
         try trust.verify(wrongAudience, fingerprintPayload: payload, at: now)
     }
+
+    let fetches = Mutex(0)
+    let offset = Mutex(Duration.zero)
+    let start = ContinuousClock.now
+    let keySet = try await MinecraftKeySet(fetching: {
+        let first = fetches.withLock { count in
+            count += 1
+            return count == 1
+        }
+        guard first else { throw URLError(.notConnectedToInternet) }
+        return trust
+    }, clock: { start.advanced(by: offset.withLock { $0 }) })
+    offset.withLock { $0 = .seconds(3600) }
+    try await keySet.verify(identity, fingerprintPayload: payload, at: now)
+    await #expect(throws: MinecraftKeySetError.unavailable) { try await keySet.refresh() }
+    try await keySet.verify(identity, fingerprintPayload: payload, at: now)
+    #expect(fetches.withLock { $0 } == 2)
+    offset.withLock { $0 = .seconds(21600) }
+    await #expect(throws: MinecraftKeySetError.unavailable) {
+        try await keySet.verify(identity, fingerprintPayload: payload, at: now)
+    }
+    #expect(fetches.withLock { $0 } == 3)
 }

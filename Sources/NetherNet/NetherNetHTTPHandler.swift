@@ -53,7 +53,7 @@ public actor NetherNetHTTPHandler {
         do {
             let answer = try await listener.answer(offer, from: networkID)
             return HTTPJoinResponse(200, contentType: "application/sdp", body: Data(answer.utf8))
-        } catch HTTPJoinError.tooManyConnections, ConnectionError.closed, is CancellationError {
+        } catch HTTPJoinError.tooManyConnections, ConnectionError.closed, MinecraftKeySetError.unavailable, is CancellationError {
             return HTTPJoinResponse(503)
         } catch HTTPJoinError.timedOut {
             return HTTPJoinResponse(504)

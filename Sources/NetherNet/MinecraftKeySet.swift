@@ -3,63 +3,93 @@ import Foundation
 import FoundationNetworking
 #endif
 
+public enum MinecraftKeySetError: Error, Equatable {
+    case unavailable
+}
+
 public actor MinecraftKeySet {
     public static let url = URL(string: MinecraftTokenTrust.issuer + ".well-known/keys")!
 
     private let fetch: @Sendable () async throws -> MinecraftTokenTrust
+    private let now: @Sendable () -> ContinuousClock.Instant
     private var trust: MinecraftTokenTrust
-    private var lastAttempt = ContinuousClock.now
-    private var lastRefresh = ContinuousClock.now
+    private var lastAttempt: ContinuousClock.Instant
+    private var lastRefresh: ContinuousClock.Instant
+    private var refreshFailed = false
     private var refreshTask: Task<MinecraftTokenTrust, any Error>?
 
     public init() async throws {
         try await self.init(fetching: Self.fetchKeys)
     }
 
-    init(fetching: @escaping @Sendable () async throws -> MinecraftTokenTrust) async throws {
+    init(
+        fetching: @escaping @Sendable () async throws -> MinecraftTokenTrust,
+        clock: @escaping @Sendable () -> ContinuousClock.Instant = { .now }
+    ) async throws {
         fetch = fetching
+        now = clock
         trust = try await fetching()
-        lastAttempt = .now
+        lastAttempt = clock()
         lastRefresh = lastAttempt
     }
 
     public func refresh() async throws {
-        if canRefresh { _ = try await update() }
+        if let task = startRefresh() {
+            _ = try await task.value
+        } else if refreshFailed {
+            throw MinecraftKeySetError.unavailable
+        }
     }
 
     public func verify(_ identity: SDPIdentity, fingerprintPayload: Data) async throws {
-        if lastRefresh.duration(to: .now) >= .seconds(3600) {
-            guard canRefresh else { throw NetherNetIdentityError.untrustedKey }
-            let refreshed = try await update()
+        try await verify(identity, fingerprintPayload: fingerprintPayload, at: .now)
+    }
+
+    func verify(_ identity: SDPIdentity, fingerprintPayload: Data, at date: Date) async throws {
+        let age = lastRefresh.duration(to: now())
+        if age >= .seconds(21600) {
+            guard let task = startRefresh() else { throw MinecraftKeySetError.unavailable }
+            let refreshed = try await task.value
             try Task.checkCancellation()
-            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload)
+            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
             return
         }
         do {
-            try trust.verify(identity, fingerprintPayload: fingerprintPayload)
+            try trust.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
+            if age >= .seconds(3600) { _ = startRefresh() }
         } catch NetherNetIdentityError.untrustedKey {
-            guard canRefresh else { throw NetherNetIdentityError.untrustedKey }
-            let refreshed = try await update()
+            guard let task = startRefresh() else {
+                if refreshFailed { throw MinecraftKeySetError.unavailable }
+                throw NetherNetIdentityError.untrustedKey
+            }
+            let refreshed = try await task.value
             try Task.checkCancellation()
-            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload)
+            try refreshed.verify(identity, fingerprintPayload: fingerprintPayload, at: date)
         }
     }
 
-    private var canRefresh: Bool {
-        refreshTask != nil || lastAttempt.duration(to: .now) >= .seconds(60)
+    private func startRefresh() -> Task<MinecraftTokenTrust, any Error>? {
+        if let refreshTask { return refreshTask }
+        let attempt = now()
+        guard lastAttempt.duration(to: attempt) >= .seconds(60) else { return nil }
+        lastAttempt = attempt
+        let task = Task { try await performRefresh() }
+        refreshTask = task
+        return task
     }
 
-    private func update() async throws -> MinecraftTokenTrust {
-        if let refreshTask { return try await refreshTask.value }
-        let fetch = self.fetch
-        let task = Task { try await fetch() }
-        refreshTask = task
-        lastAttempt = .now
+    private func performRefresh() async throws -> MinecraftTokenTrust {
         defer { refreshTask = nil }
-        let result = try await task.value
-        trust = result
-        lastRefresh = .now
-        return result
+        do {
+            let result = try await fetch()
+            trust = result
+            lastRefresh = now()
+            refreshFailed = false
+            return result
+        } catch {
+            refreshFailed = true
+            throw MinecraftKeySetError.unavailable
+        }
     }
 
     private static func fetchKeys() async throws -> MinecraftTokenTrust {
