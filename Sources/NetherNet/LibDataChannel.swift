@@ -12,6 +12,7 @@ public enum WebRTCError: Error, Equatable {
     case missingSymbol(String)
     case unsupportedArchitecture
     case invalidICEServer
+    case invalidICEPortRange
     case invalidBufferLimit
     case connectionFailed
     case native(Int32)
@@ -26,10 +27,14 @@ private typealias MessageCallback = @convention(c) (Int32, UnsafePointer<CChar>?
 public final class LibDataChannel: @unchecked Sendable {
     private let symbols: [String: UnsafeMutableRawPointer]
     fileprivate let maximumBufferedAmount: Int
+    fileprivate let icePorts: ClosedRange<UInt16>?
 
-    public init(libraryPath: String, maximumBufferedAmount: Int = 4 * 1024 * 1024) throws {
+    public init(
+        libraryPath: String, maximumBufferedAmount: Int = 4 * 1024 * 1024, icePorts: ClosedRange<UInt16>? = nil
+    ) throws {
         guard MemoryLayout<Int>.size == 8 else { throw WebRTCError.unsupportedArchitecture }
         guard maximumBufferedAmount > 0, maximumBufferedAmount <= Int(Int32.max) else { throw WebRTCError.invalidBufferLimit }
+        guard icePorts?.contains(0) != true else { throw WebRTCError.invalidICEPortRange }
         #if os(Windows)
         guard let handle = Array(libraryPath.utf16 + [0]).withUnsafeBufferPointer({ LoadLibraryW($0.baseAddress) }) else {
             throw WebRTCError.libraryUnavailable(libraryPath)
@@ -66,6 +71,7 @@ public final class LibDataChannel: @unchecked Sendable {
         }
         symbols = resolved
         self.maximumBufferedAmount = maximumBufferedAmount
+        self.icePorts = icePorts
     }
 
     public func makePeer() throws -> any WebRTCPeer {
@@ -217,6 +223,10 @@ private final class NativePeer: WebRTCPeer, @unchecked Sendable {
         defer { config.deallocate() }
         config.initializeMemory(as: UInt8.self, repeating: 0, count: 56)
         config.storeBytes(of: UInt8(1), toByteOffset: 42, as: UInt8.self) // disable auto negotiation
+        if let ports = api.icePorts {
+            config.storeBytes(of: ports.lowerBound, toByteOffset: 44, as: UInt16.self) // first ice udp port
+            config.storeBytes(of: ports.upperBound, toByteOffset: 46, as: UInt16.self) // last ice udp port
+        }
         let servers = iceServers.map { url in
             url.utf8CString.withUnsafeBufferPointer { bytes in
                 let string = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)

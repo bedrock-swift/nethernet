@@ -22,6 +22,8 @@ A Swift library implementing NetherNet for Minecraft: Bedrock Edition.
 
 The native send buffer defaults to 4 MiB per data channel. Configure it with `LibDataChannel(libraryPath:maximumBufferedAmount:)`. A send that would exceed the limit throws `ConnectionError.sendQueueFull` before queuing any fragments. The connection remains open so the caller can retry.
 
+Set `icePorts` on `LibDataChannel` to constrain the UDP ports used for ICE. A single-port range is intended for a single-peer test. Leave the range unset to let libdatachannel select ports automatically.
+
 Build with Swift 6.1 or later and run `swift test`.
 
 The echo demo uses IPv4 loopback and requires a 64-bit libdatachannel 0.24.3 shared library. Make its runtime dependencies available to the system loader, then run the server and client in separate terminals.
