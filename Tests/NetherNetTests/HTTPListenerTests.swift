@@ -59,7 +59,7 @@ func httpListenerCountsVerificationAgainstAdmission(perSource: Bool) async throw
     ) { AnsweringPeer() }
     let peer = try SDPIdentity(domain: "test", token: "e30.e30.AA", fingerprintSignature: "e30..AA")
     let offer = try peer.adding(to: "v=0\r\na=fingerprint:sha-256 AB:CD\r\n")
-    let source: HTTPJoinSource? = perSource ? .ipv4(0x7f000001) : nil
+    let source: HTTPJoinSource = perSource ? .ipv4(0x7f000001) : .unlimited
     let first = Task { try await listener.answer(offer, from: 1, source: source) }
     defer {
         unblock.continuation.finish()
@@ -82,14 +82,18 @@ func httpListenerCountsVerificationAgainstAdmission(perSource: Bool) async throw
         players: 1, capacity: 8, gameMode: 0
     )
     let handler = NetherNetHTTPHandler(listener: listener, status: status)
-    let statusResponse = await handler.handle(method: "GET", path: "/v1/join?version=1.26.60&protocol=2225&id=42")
+    let statusResponse = await handler.handle(method: "GET", path: "/v1/join?version=1.26.60&protocol=2225&id=42", source: .unlimited)
     #expect(statusResponse.statusCode == 200)
     #expect(statusResponse.contentType == "application/json")
     #expect(try JSONDecoder().decode(HTTPServerStatus.self, from: statusResponse.body) == status)
 
-    let malformed = await handler.handle(method: "POST", path: "/v1/join/+42?version=1.26.60", body: Data("offer".utf8))
+    let malformed = await handler.handle(
+        method: "POST", path: "/v1/join/+42?version=1.26.60", body: Data("offer".utf8), source: .unlimited
+    )
     #expect(malformed.statusCode == 400)
-    let answer = await handler.handle(method: "POST", path: "/v1/join/42?version=1.26.60", body: Data("offer".utf8))
+    let answer = await handler.handle(
+        method: "POST", path: "/v1/join/42?version=1.26.60", body: Data("offer".utf8), source: .unlimited
+    )
     #expect(answer.statusCode == 200)
     #expect(answer.contentType == "application/sdp")
     #expect(answer.body == Data("answer".utf8))

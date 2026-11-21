@@ -32,7 +32,7 @@ public actor NetherNetHTTPHandler {
         await listener.close()
     }
 
-    public func handle(method: String, path: String, body: Data = Data(), source: HTTPJoinSource? = nil) async -> HTTPJoinResponse {
+    public func handle(method: String, path: String, body: Data = Data(), source: HTTPJoinSource) async -> HTTPJoinResponse {
         guard !closed else { return HTTPJoinResponse(503) }
         let path = path.prefix { $0 != "?" }
         if path == "/v1/join" {

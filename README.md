@@ -37,10 +37,10 @@ swift run nethernet-demo dial-http https://example.com:19132 /path/to/libdatacha
 
 Mount `NetherNetHTTPHandler` in an HTTP server to serve `GET /v1/join` and `POST /v1/join/{networkID}`. Pass the request method, path and body to `handle`, then return its status, content type and body. Open WebRTC connections arrive on `handler.connections`.
 
-Pass the HTTP peer address as `source` to limit connections per IPv4 address or IPv6 /64. Use the address from the socket or an address validated by a trusted proxy.
+Pass the HTTP peer address as `source`. Use the address from the socket or one validated by a trusted proxy. The default limit is eight sessions per IPv4 address or IPv6 /64, including verification and active connections. Players behind the same NAT share that limit. Set `maximumConnectionsPerSource` for your deployment, or pass `.unlimited` explicitly to apply only the global connection limit.
 
 Pass `HTTPJoinIdentity` to attach a signer or require verification. The callbacks receive the canonical fingerprint payload and supply the signing keys and token trust policy.
 
 Use `NetherNetSigningKey` for self-signed identity. Persist its PEM across restarts and pin its public DER key on clients you control.
 Use `MinecraftTokenTrust` with a trusted Minecraft JWKS to verify player tokens and SDP fingerprints.
-Use `MinecraftKeySet` to fetch and refresh the issuer keys over HTTPS. Pass its async verifier to `HTTPJoinIdentity`.
+Use `MinecraftKeySet` to fetch and refresh the issuer keys over HTTPS. Pass its async verifier to `HTTPJoinIdentity`. The cache refreshes in the background after one hour and can verify tokens with cached keys during outages. After six hours since the last successful fetch, new joins require a successful refresh.

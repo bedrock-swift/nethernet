@@ -1,8 +1,9 @@
 public enum HTTPJoinSource: Sendable {
     case ipv4(UInt32)
     case ipv6(high: UInt64, low: UInt64)
+    case unlimited
 
-    fileprivate var network: JoinNetwork {
+    fileprivate var network: JoinNetwork? {
         switch self {
         case .ipv4(let address):
             .ipv4(address)
@@ -10,6 +11,8 @@ public enum HTTPJoinSource: Sendable {
             .ipv4(UInt32(truncatingIfNeeded: low))
         case .ipv6(let high, _):
             .ipv6Prefix(high)
+        case .unlimited:
+            nil
         }
     }
 }
@@ -62,7 +65,7 @@ public actor NetherNetHTTPListener {
     deinit { output.finish() }
 
     public func answer(
-        _ offer: String, from networkID: UInt64, source: HTTPJoinSource? = nil, timeout: Duration = .seconds(15)
+        _ offer: String, from networkID: UInt64, source: HTTPJoinSource = .unlimited, timeout: Duration = .seconds(15)
     ) async throws -> String {
         guard !offer.isEmpty else { throw HTTPJoinError.invalidOffer }
         guard offer.utf8.count <= maximumHTTPJoinBody else { throw HTTPJoinError.bodyTooLarge }
@@ -75,7 +78,7 @@ public actor NetherNetHTTPListener {
         guard !closed else { throw ConnectionError.closed }
         guard sessions.count + verifying < maximumConnections else { throw HTTPJoinError.tooManyConnections }
 
-        let network = source?.network
+        let network = source.network
         if let network {
             let active = sessions.values.lazy.filter { $0.network == network }.count
             guard active + verifyingByNetwork[network, default: 0] < maximumConnectionsPerSource else {
