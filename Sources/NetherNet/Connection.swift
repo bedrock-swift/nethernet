@@ -44,7 +44,7 @@ public actor NetherNetConnection {
 
     private let peer: any WebRTCPeer
     private let signaling: any NetherNetSignaling
-    private let output: AsyncThrowingStream<[UInt8], any Error>.Continuation
+    private let output: ReceiveQueue<[UInt8]>
     private var worker: Task<Void, Never>?
     private var opened: Set<DataChannel> = []
     private var incoming = MessageCodec()
@@ -65,9 +65,9 @@ public actor NetherNetConnection {
         self.signaling = signaling
         self.peer = peer
         self.authenticatedRemoteKey = authenticatedRemoteKey
-        let stream = AsyncThrowingStream<[UInt8], any Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
-        messages = stream.stream
-        output = stream.continuation
+        let queue = ReceiveQueue<[UInt8]>(capacity: 64)
+        messages = AsyncThrowingStream(unfolding: queue.next)
+        output = queue
     }
 
     deinit {
@@ -174,7 +174,7 @@ public actor NetherNetConnection {
                 opened.insert(channel)
             case let .message(channel, bytes):
                 if let message = try incoming.receive(bytes, reliable: channel == .reliable),
-                   case .dropped = output.yield(message) {
+                   output.offer(message, bytes: message.count, reliable: channel == .reliable) == .overflow {
                     throw ConnectionError.overflow
                 }
             case let .failed(error):

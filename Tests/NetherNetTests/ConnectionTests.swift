@@ -73,6 +73,34 @@ private struct StubPeer: WebRTCPeer {
         stream.continuation.yield(.open(.reliable))
         stream.continuation.yield(.open(.unreliable))
     }
+    func deliver(_ message: [UInt8], on channel: DataChannel) {
+        stream.continuation.yield(.message(channel, [0] + message))
+    }
     func close() { stream.continuation.finish() }
     func fail() { stream.continuation.yield(.failed(WebRTCError.connectionFailed)) }
+}
+
+@Test(.timeLimit(.minutes(1))) func unreliableInboxTrafficLeavesRoomForReliableMessages() async throws {
+    let peer = StubPeer()
+    let connection = NetherNetConnection(networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer)
+    try await connection.start()
+    peer.open()
+    for value in 0..<64 {
+        peer.deliver([UInt8(value)], on: .unreliable)
+    }
+    peer.deliver([255], on: .reliable)
+    peer.close()
+
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while !(await connection.isClosed), ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(1))
+    }
+    try #require(await connection.isClosed)
+
+    var iterator = connection.messages.makeAsyncIterator()
+    var values: [UInt8] = []
+    while let message = try await iterator.next() {
+        values += message
+    }
+    #expect(values == (0..<32).map(UInt8.init) + [255])
 }
