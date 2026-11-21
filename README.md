@@ -8,7 +8,7 @@ A Swift implementation of Minecraft: Bedrock Edition's WebRTC transport.
 [![NetherNet transport](https://img.shields.io/badge/transport-NetherNet-black?style=flat-square)](https://github.com/Mojang/bedrock-protocol-docs)
 [![MIT license](https://img.shields.io/github/license/bedrock-swift/nethernet?style=flat-square)](LICENSE)
 
-<a href="https://dsc.gg/bedrock-swift"><img src="https://raw.githubusercontent.com/bedrock-swift/waygate/discord-card/discord.svg" width="320" alt="Bedrock Swift on Discord"></a>
+<a href="https://dsc.gg/bedrock-swift"><img src="https://bedrock-swift-discord.truetemm.workers.dev/discord.svg" width="320" alt="Bedrock Swift on Discord"></a>
 
 </div>
 
