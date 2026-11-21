@@ -15,6 +15,15 @@ import Testing
     let now = Date(timeIntervalSince1970: 1000)
 
     try trust.verify(identity, fingerprintPayload: payload, at: now)
+    let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+    for algorithm in ["none", "HS256"] {
+        let header = try JSONEncoder().encode(["alg": algorithm, "kid": "test"])
+        let rejected = [ES384JWS.encode(header), String(segments[1]), String(segments[2])].joined(separator: ".")
+        let malformed = try SDPIdentity(domain: "minecraft.test", token: rejected, fingerprintSignature: fingerprintSignature)
+        #expect(throws: ES384JWS.FormatError.unsupportedHeader) {
+            try trust.verify(malformed, fingerprintPayload: payload, at: now)
+        }
+    }
     let object = try #require(JSONSerialization.jsonObject(with: Data(jwks.utf8)) as? [String: [[String: String]]])
     let key = try #require(object["keys"]?.first)
     var duplicate = key
@@ -28,8 +37,9 @@ import Testing
     #expect(throws: NetherNetIdentityError.invalidSignature) {
         try trust.verify(identity, fingerprintPayload: Data("different".utf8), at: now)
     }
+    try trust.verify(identity, fingerprintPayload: payload, at: Date(timeIntervalSince1970: 2059))
     #expect(throws: NetherNetIdentityError.expiredToken) {
-        try trust.verify(identity, fingerprintPayload: payload, at: Date(timeIntervalSince1970: 2000))
+        try trust.verify(identity, fingerprintPayload: payload, at: Date(timeIntervalSince1970: 2060))
     }
     #expect(throws: NetherNetIdentityError.invalidClaims) {
         try trust.verify(wrongAudience, fingerprintPayload: payload, at: now)

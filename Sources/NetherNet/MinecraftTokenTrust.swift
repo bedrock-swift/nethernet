@@ -42,9 +42,10 @@ public struct MinecraftTokenTrust: Sendable {
         }
         let claims = try JSONDecoder().decode(Claims.self, from: jws.payload)
         let time = now.timeIntervalSince1970
-        guard claims.exp > time else { throw NetherNetIdentityError.expiredToken }
+        let skew = NetherNetSigningKey.clockSkew
+        guard claims.exp > time - skew else { throw NetherNetIdentityError.expiredToken }
         guard claims.iss == Self.issuer, claims.aud.contains(Self.audience), !claims.sub.isEmpty,
-              (claims.nbf ?? time) <= time else { throw NetherNetIdentityError.invalidClaims }
+              (claims.nbf ?? time) <= time + skew else { throw NetherNetIdentityError.invalidClaims }
         try NetherNetSigningKey.verifyFingerprint(identity, payload: fingerprintPayload, key: claims.cpk.key)
     }
 

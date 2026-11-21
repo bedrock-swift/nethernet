@@ -22,6 +22,6 @@ let package = Package(
             linkerSettings: [.linkedLibrary("ws2_32", .when(platforms: [.windows]))]
         ),
         .executableTarget(name: "NetherNetDemo", dependencies: ["NetherNet"]),
-        .testTarget(name: "NetherNetTests", dependencies: ["NetherNet"])
+        .testTarget(name: "NetherNetTests", dependencies: ["NetherNet", .product(name: "Crypto", package: "swift-crypto")])
     ]
 )

@@ -9,6 +9,8 @@ public enum NetherNetIdentityError: Error, Equatable {
 }
 
 public struct NetherNetSigningKey: Sendable {
+    static let clockSkew: TimeInterval = 60
+
     private let key: P384.Signing.PrivateKey
     public let domain: String
 
@@ -46,8 +48,8 @@ public struct NetherNetSigningKey: Sendable {
         guard verify(token, with: key) else { throw NetherNetIdentityError.invalidSignature }
         let claims = try JSONDecoder().decode(ReceivedClaims.self, from: token.payload)
         let time = now.timeIntervalSince1970
-        guard claims.exp > time else { throw NetherNetIdentityError.expiredToken }
-        guard (claims.nbf ?? time) <= time else { throw NetherNetIdentityError.invalidClaims }
+        guard claims.exp > time - Self.clockSkew else { throw NetherNetIdentityError.expiredToken }
+        guard (claims.nbf ?? time) <= time + Self.clockSkew else { throw NetherNetIdentityError.invalidClaims }
         guard claims.cpk.key.x963Representation == key.x963Representation else { throw NetherNetIdentityError.untrustedKey }
         guard claims.iss == nil || claims.iss == identity.domain else { throw NetherNetIdentityError.invalidClaims }
         try verifyFingerprint(identity, payload: payload, key: key)
