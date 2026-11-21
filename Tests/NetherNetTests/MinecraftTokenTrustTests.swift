@@ -19,6 +19,8 @@ import Testing
         "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE1etgK5s6PDkrIhCimYKp0GzlIlJPo3RUY8rKbCUKEGUeKhrvidia4fahlmf8IeLrGqjH2L7/2rVhbhXo+d7hXAtCimc5y6FC5FaGJIB78mIPSWivnwW2AVJIXoatDmPf"
     ))
     #expect(authenticatedKey == Array(expectedKey))
+    let peer = try trust.authenticatedPeer(for: identity, fingerprintPayload: payload, at: now)
+    #expect(peer == NetherNetPeerIdentity(subject: "test-player", publicKeyDER: authenticatedKey))
     let segments = token.split(separator: ".", omittingEmptySubsequences: false)
     for algorithm in ["none", "HS256"] {
         let header = try JSONEncoder().encode(["alg": algorithm, "kid": "test"])

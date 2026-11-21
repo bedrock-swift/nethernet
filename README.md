@@ -35,7 +35,7 @@ Mount `NetherNetHTTPHandler` in your HTTP server to handle `GET /v1/join` and `P
 
 The default limit is eight sessions per IPv4 address or IPv6 /64, shared by players behind the same NAT. Configure `maximumConnectionsPerSource` to change it.
 
-For Minecraft client identity, use `MinecraftKeySet.authenticatedKey` in the `HTTPJoinIdentity` authentication callback. This retains the verified key on the connection. The `verify` callback validates the offer without retaining a key. Persist the signing key for the server's SDP answers across restarts.
+For Minecraft client identity, use `MinecraftKeySet.authenticatedPeer` with `HTTPJoinIdentity(authenticatePeer:)`. The connection exposes the verified token subject and key. The `verify` callback validates the offer without retaining a key. Persist the signing key for the server's SDP answers across restarts.
 
 Cached Mojang keys continue to work during a refresh outage for up to six hours from the last successful fetch.
 

@@ -33,7 +33,8 @@ public enum ConnectionError: Error, Equatable {
 public actor NetherNetConnection {
     public nonisolated let networkID: UInt64
     public nonisolated let connectionID: UInt64
-    public nonisolated let authenticatedRemoteKey: [UInt8]?
+    public nonisolated let authenticatedRemoteIdentity: NetherNetPeerIdentity?
+    public nonisolated var authenticatedRemoteKey: [UInt8]? { authenticatedRemoteIdentity?.publicKeyDER }
     public nonisolated let messages: AsyncThrowingStream<[UInt8], any Error>
 
     private enum Negotiation {
@@ -60,11 +61,21 @@ public actor NetherNetConnection {
         networkID: UInt64, connectionID: UInt64, signaling: any NetherNetSignaling, peer: any WebRTCPeer,
         authenticatedRemoteKey: [UInt8]? = nil
     ) {
+        self.init(
+            networkID: networkID, connectionID: connectionID, signaling: signaling, peer: peer,
+            authenticatedRemoteIdentity: authenticatedRemoteKey.map { NetherNetPeerIdentity(publicKeyDER: $0) }
+        )
+    }
+
+    init(
+        networkID: UInt64, connectionID: UInt64, signaling: any NetherNetSignaling, peer: any WebRTCPeer,
+        authenticatedRemoteIdentity: NetherNetPeerIdentity?
+    ) {
         self.networkID = networkID
         self.connectionID = connectionID
         self.signaling = signaling
         self.peer = peer
-        self.authenticatedRemoteKey = authenticatedRemoteKey
+        self.authenticatedRemoteIdentity = authenticatedRemoteIdentity
         let queue = ReceiveQueue<[UInt8]>(capacity: 64)
         messages = AsyncThrowingStream(unfolding: queue.next)
         output = queue

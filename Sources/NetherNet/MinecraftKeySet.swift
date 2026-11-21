@@ -50,17 +50,23 @@ public actor MinecraftKeySet {
     }
 
     public func authenticatedKey(for identity: SDPIdentity, fingerprintPayload: Data, at date: Date = .now) async throws -> [UInt8] {
+        try await authenticatedPeer(for: identity, fingerprintPayload: fingerprintPayload, at: date).publicKeyDER
+    }
+
+    public func authenticatedPeer(
+        for identity: SDPIdentity, fingerprintPayload: Data, at date: Date = .now
+    ) async throws -> NetherNetPeerIdentity {
         let age = lastRefresh.duration(to: now())
         if age >= .seconds(21600) {
             guard let task = startRefresh() else { throw MinecraftKeySetError.unavailable }
             let refreshed = try await task.value
             try Task.checkCancellation()
-            return try refreshed.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
+            return try refreshed.authenticatedPeer(for: identity, fingerprintPayload: fingerprintPayload, at: date)
         }
         do {
-            let key = try trust.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
+            let peer = try trust.authenticatedPeer(for: identity, fingerprintPayload: fingerprintPayload, at: date)
             if age >= .seconds(3600) { _ = startRefresh() }
-            return key
+            return peer
         } catch NetherNetIdentityError.untrustedKey {
             guard let task = startRefresh() else {
                 if refreshFailed { throw MinecraftKeySetError.unavailable }
@@ -68,7 +74,7 @@ public actor MinecraftKeySet {
             }
             let refreshed = try await task.value
             try Task.checkCancellation()
-            return try refreshed.authenticatedKey(for: identity, fingerprintPayload: fingerprintPayload, at: date)
+            return try refreshed.authenticatedPeer(for: identity, fingerprintPayload: fingerprintPayload, at: date)
         }
     }
 

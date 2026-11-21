@@ -18,14 +18,32 @@ import Testing
     #expect(await connection.isClosed)
 }
 
+@Test(.timeLimit(.minutes(1))) func httpListenerRetainsTheAuthenticatedSubjectAndKey() async throws {
+    let assertion = try SDPIdentity(domain: "test", token: "e30.e30.AA", fingerprintSignature: "e30..AA")
+    let offer = try assertion.adding(to: "v=0\r\na=fingerprint:sha-256 AB:CD\r\n")
+    let peer = NetherNetPeerIdentity(subject: "test-player", publicKeyDER: [1, 2, 3])
+    let listener = try NetherNetHTTPListener(identity: HTTPJoinIdentity(authenticatePeer: { _, _ in peer })) {
+        AnsweringPeer(expectedOffer: offer)
+    }
+    _ = try await listener.answer(offer, from: 42, timeout: .seconds(1))
+    var incoming = listener.connections.makeAsyncIterator()
+    let connection = try #require(await incoming.next())
+    #expect(connection.authenticatedRemoteIdentity == peer)
+    #expect(connection.authenticatedRemoteKey == peer.publicKeyDER)
+    await listener.close()
+}
+
 private struct AnsweringPeer: WebRTCPeer {
+    let expectedOffer: String
     private let stream = AsyncStream<PeerEvent>.makeStream()
     var events: AsyncStream<PeerEvent> { stream.stream }
+
+    init(expectedOffer: String = "offer") { self.expectedOffer = expectedOffer }
 
     func offer() throws { throw ConnectionError.invalidSignal }
 
     func remoteDescription(_ sdp: String, kind: Signal.Kind) throws {
-        guard kind == .offer, sdp == "offer" else { throw ConnectionError.invalidSignal }
+        guard kind == .offer, sdp == expectedOffer else { throw ConnectionError.invalidSignal }
         stream.continuation.yield(.description(.answer, "answer"))
         stream.continuation.yield(.open(.reliable))
         stream.continuation.yield(.open(.unreliable))

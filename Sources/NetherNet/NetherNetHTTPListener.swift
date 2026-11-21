@@ -88,10 +88,10 @@ public actor NetherNetHTTPListener {
         }
         let deadline = ContinuousClock.now.advanced(by: timeout)
         verifying += 1
-        let authenticatedKey: [UInt8]?
+        let authenticatedPeer: NetherNetPeerIdentity?
         do {
             defer { endVerification(on: network) }
-            authenticatedKey = try await identity.validateRemote(offer)
+            authenticatedPeer = try await identity.validateRemote(offer)
         }
         try Task.checkCancellation()
         guard !closed else { throw ConnectionError.closed }
@@ -102,7 +102,7 @@ public actor NetherNetHTTPListener {
         let exchange = HTTPAnswerExchange(identity: identity)
         let connection = NetherNetConnection(
             networkID: networkID, connectionID: id, signaling: exchange, peer: try peerFactory(),
-            authenticatedRemoteKey: authenticatedKey
+            authenticatedRemoteIdentity: authenticatedPeer
         )
         sessions[id] = Session(connection: connection, network: network)
         do {
