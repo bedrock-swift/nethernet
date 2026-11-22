@@ -16,6 +16,8 @@ A Swift implementation of Minecraft: Bedrock Edition's WebRTC transport.
 
 Add NetherNet to your Swift package and use the `NetherNet` product. Swift 6.1 or later is required. The included WebRTC backend loads a 64-bit libdatachannel 0.24.3 shared library at runtime.
 
+Builds with the Swift Static Linux SDK (musl) require a custom WebRTC peer backend. Statically linked applications cannot load the shared library.
+
 ```swift
 .package(url: "https://github.com/bedrock-swift/nethernet.git", branch: "main")
 ```

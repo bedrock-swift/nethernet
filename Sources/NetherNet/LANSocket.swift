@@ -25,7 +25,11 @@ import Darwin
 private typealias SocketHandle = Int32
 private typealias AddressLength = socklen_t
 #else
+#if canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 private typealias SocketHandle = Int32
 private typealias AddressLength = socklen_t
 #endif
@@ -51,7 +55,7 @@ final class LANSocket: Sendable {
         guard startup == 0 else { throw SocketError.startup(startup) }
         let handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP.rawValue)
         let invalidHandle = SocketHandle.max
-        #elseif os(Linux)
+        #elseif canImport(Glibc)
         let handle = socket(AF_INET, Int32(SOCK_DGRAM.rawValue), Int32(IPPROTO_UDP))
         let invalidHandle: SocketHandle = -1
         #else
@@ -216,8 +220,10 @@ final class LANSocket: Sendable {
         _ = WSACleanup()
         #elseif canImport(Darwin)
         _ = Darwin.close(handle)
-        #else
+        #elseif canImport(Glibc)
         _ = Glibc.close(handle)
+        #elseif canImport(Musl)
+        _ = Musl.close(handle)
         #endif
     }
 }
