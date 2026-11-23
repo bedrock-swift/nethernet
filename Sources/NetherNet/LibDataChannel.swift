@@ -194,7 +194,10 @@ private final class ChannelContext: @unchecked Sendable {
             guard let context = callbacks[id], let channel = context.channel(id) else { return }
             context.yield(.open(channel))
         }
-        _ = onClose(id) { id, _ in callbacks[id]?.yield(.closed) }
+        _ = onClose(id) { id, _ in
+            guard let context = callbacks[id], let channel = context.channel(id) else { return }
+            context.yield(.channelClosed(channel))
+        }
         _ = onError(id) { id, _, _ in
             guard let context = callbacks[id], let channel = context.channel(id) else { return }
             context.yield(.failed(WebRTCError.dataChannelFailed(channel)))

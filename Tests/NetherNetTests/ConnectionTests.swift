@@ -44,6 +44,21 @@ func openingReportsNativePeerFailure(_ failure: WebRTCError) async throws {
         #expect(error as? WebRTCError == failure)
     }
     await #expect(throws: failure) { try await connection.checkOpen() }
+    #expect(await connection.termination == .failed)
+}
+
+@Test(.timeLimit(.minutes(1))) func channelClosurePreservesBufferedMessagesAndTermination() async throws {
+    let peer = StubPeer()
+    let connection = NetherNetConnection(networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer)
+    try await connection.start()
+    peer.deliver([42], on: .reliable)
+    peer.closeChannel(.reliable)
+
+    var messages = connection.messages.makeAsyncIterator()
+    #expect(try await messages.next() == [42])
+    #expect(try await messages.next() == nil)
+    await connection.close()
+    #expect(await connection.termination == .channelClosed(.reliable))
 }
 
 @Test func sendQueuePressureKeepsTheConnectionOpen() async throws {
@@ -78,6 +93,7 @@ private struct StubPeer: WebRTCPeer {
         stream.continuation.yield(.message(channel, [0] + message))
     }
     func close() { stream.continuation.finish() }
+    func closeChannel(_ channel: DataChannel) { stream.continuation.yield(.channelClosed(channel)) }
     func fail(_ failure: WebRTCError) { stream.continuation.yield(.failed(failure)) }
 }
 

@@ -9,6 +9,7 @@ public enum PeerEvent: Sendable {
     case open(DataChannel)
     case message(DataChannel, [UInt8])
     case failed(any Error)
+    case channelClosed(DataChannel)
     case closed
 }
 
@@ -31,6 +32,14 @@ public enum ConnectionError: Error, Equatable {
 }
 
 public actor NetherNetConnection {
+    public enum Termination: Equatable, Sendable {
+        case local
+        case peerClosed
+        case channelClosed(DataChannel)
+        case eventsEnded
+        case failed
+    }
+
     public nonisolated let networkID: UInt64
     public nonisolated let connectionID: UInt64
     public nonisolated let authenticatedRemoteIdentity: NetherNetPeerIdentity?
@@ -54,7 +63,8 @@ public actor NetherNetConnection {
     private var localCandidates: [String] = []
     private var remoteCandidates: [String] = []
     private var seenRemoteCandidates: Set<String> = []
-    private var closed = false
+    public private(set) var termination: Termination?
+    private var closed: Bool { termination != nil }
     private var closeError: (any Error)?
 
     public init(
@@ -153,7 +163,7 @@ public actor NetherNetConnection {
     }
 
     public func close() {
-        finish()
+        finish(termination: .local)
     }
 
     private func observe() {
@@ -161,7 +171,7 @@ public actor NetherNetConnection {
         let events = peer.events
         worker = Task { [weak self] in
             for await event in events { await self?.handle(event) }
-            await self?.finish()
+            await self?.finish(termination: .eventsEnded)
         }
     }
 
@@ -190,8 +200,10 @@ public actor NetherNetConnection {
                 }
             case let .failed(error):
                 finish(error)
+            case let .channelClosed(channel):
+                finish(termination: .channelClosed(channel))
             case .closed:
-                finish()
+                finish(termination: .peerClosed)
             }
         } catch {
             finish(error)
@@ -202,9 +214,9 @@ public actor NetherNetConnection {
         try await signaling.send(Signal(kind: kind, connectionID: connectionID, data: data), to: networkID)
     }
 
-    private func finish(_ error: (any Error)? = nil) {
+    private func finish(_ error: (any Error)? = nil, termination: Termination = .failed) {
         guard !closed else { return }
-        closed = true
+        self.termination = termination
         closeError = error
         worker?.cancel()
         output.finish(throwing: error)
