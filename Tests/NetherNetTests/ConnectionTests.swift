@@ -30,19 +30,20 @@ import Testing
     await connection.close()
 }
 
-@Test(.timeLimit(.minutes(1))) func openingReportsNativePeerFailure() async throws {
+@Test(.timeLimit(.minutes(1)), arguments: [WebRTCError.connectionFailed, .dataChannelFailed(.reliable)])
+func openingReportsNativePeerFailure(_ failure: WebRTCError) async throws {
     let peer = StubPeer()
     let connection = NetherNetConnection(networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer)
     try await connection.start()
-    peer.fail()
+    peer.fail(failure)
     var messages = connection.messages.makeAsyncIterator()
     do {
         _ = try await messages.next()
         Issue.record("missing WebRTC error")
     } catch {
-        #expect(error as? WebRTCError == .connectionFailed)
+        #expect(error as? WebRTCError == failure)
     }
-    await #expect(throws: WebRTCError.connectionFailed) { try await connection.checkOpen() }
+    await #expect(throws: failure) { try await connection.checkOpen() }
 }
 
 @Test func sendQueuePressureKeepsTheConnectionOpen() async throws {
@@ -77,7 +78,7 @@ private struct StubPeer: WebRTCPeer {
         stream.continuation.yield(.message(channel, [0] + message))
     }
     func close() { stream.continuation.finish() }
-    func fail() { stream.continuation.yield(.failed(WebRTCError.connectionFailed)) }
+    func fail(_ failure: WebRTCError) { stream.continuation.yield(.failed(failure)) }
 }
 
 @Test(.timeLimit(.minutes(1))) func unreliableInboxTrafficLeavesRoomForReliableMessages() async throws {

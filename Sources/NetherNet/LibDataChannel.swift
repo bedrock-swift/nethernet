@@ -17,6 +17,7 @@ public enum WebRTCError: Error, Equatable {
     case invalidICEPortRange
     case invalidBufferLimit
     case connectionFailed
+    case dataChannelFailed(DataChannel)
     case native(Int32)
 }
 
@@ -24,6 +25,7 @@ private typealias DescriptionCallback = @convention(c) (Int32, UnsafePointer<CCh
 private typealias StateCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias ChannelCallback = @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Void
 private typealias OpenCallback = @convention(c) (Int32, UnsafeMutableRawPointer?) -> Void
+private typealias ErrorCallback = @convention(c) (Int32, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void
 private typealias MessageCallback = @convention(c) (Int32, UnsafePointer<CChar>?, Int32, UnsafeMutableRawPointer?) -> Void
 
 public final class LibDataChannel: @unchecked Sendable {
@@ -52,7 +54,7 @@ public final class LibDataChannel: @unchecked Sendable {
             "rtcSetLocalDescription", "rtcSetRemoteDescription", "rtcAddRemoteCandidate",
             "rtcSetStateChangeCallback", "rtcSetGatheringStateChangeCallback", "rtcGetLocalDescription", "rtcGetLocalDescriptionType",
             "rtcCreateDataChannel", "rtcCreateDataChannelEx", "rtcDeleteDataChannel", "rtcGetDataChannelLabel",
-            "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetMessageCallback", "rtcIsOpen",
+            "rtcSetOpenCallback", "rtcSetClosedCallback", "rtcSetErrorCallback", "rtcSetMessageCallback", "rtcIsOpen",
             "rtcGetBufferedAmount", "rtcSendMessage"
         ]
         var resolved: [String: UnsafeMutableRawPointer] = [:]
@@ -186,12 +188,17 @@ private final class ChannelContext: @unchecked Sendable {
         api.useCallbacks(for: id)
         let onOpen = api.function("rtcSetOpenCallback", as: (@convention(c) (Int32, OpenCallback?) -> Int32).self)
         let onClose = api.function("rtcSetClosedCallback", as: (@convention(c) (Int32, OpenCallback?) -> Int32).self)
+        let onError = api.function("rtcSetErrorCallback", as: (@convention(c) (Int32, ErrorCallback?) -> Int32).self)
         let onMessage = api.function("rtcSetMessageCallback", as: (@convention(c) (Int32, MessageCallback?) -> Int32).self)
         _ = onOpen(id) { id, _ in
             guard let context = callbacks[id], let channel = context.channel(id) else { return }
             context.yield(.open(channel))
         }
         _ = onClose(id) { id, _ in callbacks[id]?.yield(.closed) }
+        _ = onError(id) { id, _, _ in
+            guard let context = callbacks[id], let channel = context.channel(id) else { return }
+            context.yield(.failed(WebRTCError.dataChannelFailed(channel)))
+        }
         _ = onMessage(id) { id, data, size, _ in
             guard let data, (1...Int32(MessageCodec.maximumIncomingSegment + 1)).contains(size),
                   let context = callbacks[id], let channel = context.channel(id) else { return }
