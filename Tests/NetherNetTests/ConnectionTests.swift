@@ -72,6 +72,26 @@ func openingReportsNativePeerFailure(_ failure: WebRTCError) async throws {
     await connection.close()
 }
 
+@Test(.timeLimit(.minutes(1))) func reliableTrafficContinuesAfterOptionalChannelCloses() async throws {
+    let peer = StubPeer()
+    let connection = NetherNetConnection(
+        networkID: 1, connectionID: 2, signaling: StubSignaling(), peer: peer, keepReliableChannelOpen: true
+    )
+    try await connection.start()
+    peer.open()
+    try await connection.waitForHTTPChannels(until: .now.advanced(by: .seconds(1)))
+    peer.closeChannel(.unreliable)
+    peer.deliver([42], on: .reliable)
+    var iterator = connection.messages.makeAsyncIterator()
+    #expect(try await iterator.next() == [42])
+    #expect(await connection.isOpen)
+    await #expect(throws: ConnectionError.notOpen) { try await connection.send([1], on: .unreliable) }
+    try await connection.send([1])
+    peer.closeChannel(.reliable)
+    #expect(try await iterator.next() == nil)
+    #expect(await connection.termination == .channelClosed(.reliable))
+}
+
 private struct StubSignaling: NetherNetSignaling {
     func send(_ signal: Signal, to networkID: UInt64) async throws {}
 }

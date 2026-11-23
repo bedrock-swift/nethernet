@@ -54,9 +54,11 @@ public actor NetherNetConnection {
 
     private let peer: any WebRTCPeer
     private let signaling: any NetherNetSignaling
+    private let keepReliableChannelOpen: Bool
     private let output: ReceiveQueue<[UInt8]>
     private var worker: Task<Void, Never>?
     private var opened: Set<DataChannel> = []
+    private var openedBothChannels = false
     private var incoming = MessageCodec()
     private var localDescriptionSent = false
     private var negotiation = Negotiation.idle
@@ -69,23 +71,25 @@ public actor NetherNetConnection {
 
     public init(
         networkID: UInt64, connectionID: UInt64, signaling: any NetherNetSignaling, peer: any WebRTCPeer,
-        authenticatedRemoteKey: [UInt8]? = nil
+        authenticatedRemoteKey: [UInt8]? = nil, keepReliableChannelOpen: Bool = false
     ) {
         self.init(
             networkID: networkID, connectionID: connectionID, signaling: signaling, peer: peer,
-            authenticatedRemoteIdentity: authenticatedRemoteKey.map { NetherNetPeerIdentity(publicKeyDER: $0) }
+            authenticatedRemoteIdentity: authenticatedRemoteKey.map { NetherNetPeerIdentity(publicKeyDER: $0) },
+            keepReliableChannelOpen: keepReliableChannelOpen
         )
     }
 
     init(
         networkID: UInt64, connectionID: UInt64, signaling: any NetherNetSignaling, peer: any WebRTCPeer,
-        authenticatedRemoteIdentity: NetherNetPeerIdentity?
+        authenticatedRemoteIdentity: NetherNetPeerIdentity?, keepReliableChannelOpen: Bool = false
     ) {
         self.networkID = networkID
         self.connectionID = connectionID
         self.signaling = signaling
         self.peer = peer
         self.authenticatedRemoteIdentity = authenticatedRemoteIdentity
+        self.keepReliableChannelOpen = keepReliableChannelOpen
         let queue = ReceiveQueue<[UInt8]>(capacity: 64)
         messages = AsyncThrowingStream(unfolding: queue.next)
         output = queue
@@ -98,7 +102,7 @@ public actor NetherNetConnection {
     }
 
     public var isClosed: Bool { closed }
-    public var isOpen: Bool { !closed && opened.count == 2 }
+    public var isOpen: Bool { !closed && openedBothChannels && opened.contains(.reliable) }
 
     func checkOpen() throws -> Bool {
         if closed { throw closeError ?? ConnectionError.closed }
@@ -150,7 +154,7 @@ public actor NetherNetConnection {
     }
 
     public func send(_ payload: [UInt8], on channel: DataChannel = .reliable) throws {
-        guard isOpen else { throw ConnectionError.notOpen }
+        guard isOpen, opened.contains(channel) else { throw ConnectionError.notOpen }
         let segments = try MessageCodec.encode(payload, reliable: channel == .reliable)
         do {
             try peer.send(segments, on: channel)
@@ -193,6 +197,7 @@ public actor NetherNetConnection {
                 }
             case let .open(channel):
                 opened.insert(channel)
+                if opened.count == 2 { openedBothChannels = true }
             case let .message(channel, bytes):
                 if let message = try incoming.receive(bytes, reliable: channel == .reliable),
                    output.offer(message, bytes: message.count, reliable: channel == .reliable) == .overflow {
@@ -200,6 +205,8 @@ public actor NetherNetConnection {
                 }
             case let .failed(error):
                 finish(error)
+            case .channelClosed(.unreliable) where keepReliableChannelOpen && isOpen:
+                opened.remove(.unreliable)
             case let .channelClosed(channel):
                 finish(termination: .channelClosed(channel))
             case .closed:

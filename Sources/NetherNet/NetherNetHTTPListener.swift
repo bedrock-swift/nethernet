@@ -35,6 +35,7 @@ public actor NetherNetHTTPListener {
     private let identity: HTTPJoinIdentity
     private let maximumConnections: Int
     private let maximumConnectionsPerSource: Int
+    private let keepReliableChannelOpen: Bool
     private var sessions: [UInt64: Session] = [:]
     private var closed = false
     private var verifying = 0
@@ -42,14 +43,17 @@ public actor NetherNetHTTPListener {
 
     public init(
         library: LibDataChannel, maximumConnections: Int = 64, maximumConnectionsPerSource: Int = 8,
-        identity: HTTPJoinIdentity = .init()
+        identity: HTTPJoinIdentity = .init(), keepReliableChannelOpen: Bool = false
     ) throws {
         try self.init(maximumConnections: maximumConnections, maximumConnectionsPerSource: maximumConnectionsPerSource,
-                      identity: identity) { try library.makePeer(trickleICE: false) }
+                      identity: identity, keepReliableChannelOpen: keepReliableChannelOpen) {
+            try library.makePeer(trickleICE: false)
+        }
     }
 
     public init(
         maximumConnections: Int = 64, maximumConnectionsPerSource: Int = 8, identity: HTTPJoinIdentity = .init(),
+        keepReliableChannelOpen: Bool = false,
         peerFactory: @escaping @Sendable () throws -> any WebRTCPeer
     ) throws {
         guard maximumConnections > 0, maximumConnectionsPerSource > 0 else { throw HTTPJoinError.invalidConnectionLimit }
@@ -60,6 +64,7 @@ public actor NetherNetHTTPListener {
         self.maximumConnections = maximumConnections
         self.maximumConnectionsPerSource = maximumConnectionsPerSource
         self.identity = identity
+        self.keepReliableChannelOpen = keepReliableChannelOpen
     }
 
     deinit { output.finish() }
@@ -102,7 +107,7 @@ public actor NetherNetHTTPListener {
         let exchange = HTTPAnswerExchange(identity: identity)
         let connection = NetherNetConnection(
             networkID: networkID, connectionID: id, signaling: exchange, peer: try peerFactory(),
-            authenticatedRemoteIdentity: authenticatedPeer
+            authenticatedRemoteIdentity: authenticatedPeer, keepReliableChannelOpen: keepReliableChannelOpen
         )
         sessions[id] = Session(connection: connection, network: network)
         do {
